@@ -46,6 +46,7 @@ class Kudora_Loyalty_Redeem {
 		Kudora_Virtual_Coupons::add_provider( 'points', array( $this, 'coupon_data' ), array( $this, 'coupon_label' ), array( $this, 'coupon_valid' ) );
 
 		add_action( 'woocommerce_before_calculate_totals', array( $this, 'sync_coupon' ), 30 );
+		add_action( 'woocommerce_check_cart_items', array( $this, 'sync_before_check' ), 0 );
 		add_action( 'woocommerce_after_calculate_totals', array( $this, 'record_applied' ), 30 );
 		add_action( 'woocommerce_removed_coupon', array( $this, 'on_removed' ) );
 		add_action( 'woocommerce_checkout_create_order_coupon_item', array( $this, 'record_on_order' ), 20, 4 );
@@ -55,8 +56,12 @@ class Kudora_Loyalty_Redeem {
 
 		add_action( 'kudora_order_placed', array( $this, 'debit_order' ), 20 );
 		add_action( 'kudora_order_voided', array( $this, 'restore_order' ), 20, 2 );
+		add_action( 'kudora_order_release', array( $this, 'restore_order' ), 20, 2 );
 		add_action( 'kudora_order_reinstated', array( $this, 'reinstate_order' ), 20, 3 );
+		add_action( 'kudora_order_before_payment', array( $this, 'before_payment' ), 20, 2 );
+		add_action( 'kudora_order_paid', array( $this, 'on_paid' ), 5 );
 		add_action( 'kudora_order_refunded', array( $this, 'refunded' ), 20, 3 );
+		add_action( 'kudora_checkout_done', array( __CLASS__, 'clear_session' ), 10, 0 );
 
 		add_filter( 'kudora_store_api_cart_data', array( $this, 'store_api_data' ) );
 		add_filter( 'kudora_store_api_action', array( $this, 'store_api_action' ), 10, 3 );
@@ -274,7 +279,7 @@ class Kudora_Loyalty_Redeem {
 				'error'  => '',
 			);
 		}
-		return self::compute( self::eligible_subtotal(), Kudora_Points_Repo::balance( $user_id ), 'custom' === $req['mode'] ? $req['points'] : null );
+		return self::compute( self::eligible_subtotal(), self::available( $user_id ), 'custom' === $req['mode'] ? $req['points'] : null );
 	}
 
 	/* ---------------------------------------------------------------------
@@ -318,8 +323,8 @@ class Kudora_Loyalty_Redeem {
 	 * @return string
 	 */
 	public function coupon_label( $code ) {
-		$applied = self::applied();
-		$points  = $applied['points'] ? $applied['points'] : self::compute_for_cart()['points'];
+		$last    = ( function_exists( 'WC' ) && WC()->session ) ? WC()->session->get( self::SESSION_APPLIED ) : null;
+		$points  = is_array( $last ) ? (int) $last['points'] : self::compute_for_cart()['points'];
 		/* translators: %s: number of points */
 		return sprintf( __( 'Loyalty points (%s)', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), self::format_points( $points ) );
 	}
@@ -364,6 +369,18 @@ class Kudora_Loyalty_Redeem {
 	}
 
 	/**
+	 * Cart check (classic cart and checkout pages): drop a points coupon that no
+	 * longer applies before WooCommerce reports it as an invalid code.
+	 *
+	 * @return void
+	 */
+	public function sync_before_check() {
+		if ( function_exists( 'WC' ) && WC()->cart ) {
+			$this->sync_coupon( WC()->cart );
+		}
+	}
+
+	/**
 	 * After totals: charge points for the discount actually given (WooCommerce may cap
 	 * a fixed cart discount below the requested amount).
 	 *
@@ -380,15 +397,27 @@ class Kudora_Loyalty_Redeem {
 		}
 		// A fixed cart coupon amount is tax-exclusive unless the store enters prices with tax.
 		$given = (float) $cart->get_coupon_discount_amount( self::CODE, ! wc_prices_include_tax() );
+		if ( $given <= 0 ) {
+			// Other discounts (a 100% coupon, a free-product reward) already took the
+			// items to zero: nothing is given, so nothing is charged.
+			WC()->session->set(
+				self::SESSION_APPLIED,
+				array(
+					'points' => 0,
+					'amount' => 0.0,
+				)
+			);
+			return;
+		}
 		$r = self::compute_for_cart();
-		if ( $given > 0 && $given + 0.00001 < $r['amount'] ) {
-			$r = self::compute( $given, Kudora_Points_Repo::balance( get_current_user_id() ), null, array_merge( self::settings(), array( 'max_type' => 'fixed', 'max_value' => $given ) ) );
+		if ( $given + 0.00001 < $r['amount'] ) {
+			$r = self::compute( $given, self::available( get_current_user_id() ), null, array_merge( self::settings(), array( 'max_type' => 'fixed', 'max_value' => $given ) ) );
 		}
 		WC()->session->set(
 			self::SESSION_APPLIED,
 			array(
 				'points' => $r['points'],
-				'amount' => $given > 0 ? $given : $r['amount'],
+				'amount' => $given,
 			)
 		);
 	}
@@ -422,6 +451,12 @@ class Kudora_Loyalty_Redeem {
 			return;
 		}
 		$applied = self::applied();
+		if ( (float) $item->get_discount() + (float) $item->get_discount_tax() <= 0 ) {
+			$applied = array(
+				'points' => 0,
+				'amount' => 0.0,
+			);
+		}
 		$order->update_meta_data(
 			'_kudora_points_redeem',
 			array(
@@ -444,7 +479,7 @@ class Kudora_Loyalty_Redeem {
 	 */
 	public function classic_validate( $data, $errors ) {
 		$applied = self::applied();
-		if ( $applied['points'] > 0 && Kudora_Points_Repo::row( get_current_user_id(), true )['balance'] < $applied['points'] ) {
+		if ( $applied['points'] > 0 && self::available( get_current_user_id(), null, true ) < $applied['points'] ) {
 			$errors->add( 'kudora_points', __( 'Your points balance changed. Please review your order.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
 	}
@@ -458,7 +493,7 @@ class Kudora_Loyalty_Redeem {
 	 */
 	public function store_api_validate( $order, $errors ) {
 		$r = self::order_redeem( $order );
-		if ( $r['points'] > 0 && 'debited' !== $order->get_meta( '_kudora_points_state' ) && Kudora_Points_Repo::row( $order->get_customer_id(), true )['balance'] < $r['points'] ) {
+		if ( $r['points'] > 0 && 'debited' !== $order->get_meta( '_kudora_points_state' ) && self::available( $order->get_customer_id(), $order, true ) < $r['points'] ) {
 			$errors->add( 'kudora_points', __( 'Your points balance changed. Please review your order.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
 	}
@@ -484,7 +519,40 @@ class Kudora_Loyalty_Redeem {
 	}
 
 	/**
-	 * Deduct the points when the order is placed.
+	 * Points the customer can use now: their balance plus what this session's own
+	 * unpaid order holds (so retrying its payment finds the same discount).
+	 *
+	 * @param int           $user_id User id.
+	 * @param WC_Order|null $order   Order being validated (its own hold is not added).
+	 * @param bool          $fresh   Read the balance from the database.
+	 * @return int
+	 */
+	public static function available( $user_id, $order = null, $fresh = false ) {
+		$balance = (int) Kudora_Points_Repo::row( $user_id, $fresh )['balance'];
+		$held    = Kudora_Order_Lifecycle::held_order();
+		if ( $held && (int) $held->get_customer_id() === (int) $user_id && ( ! $order || $held->get_id() !== $order->get_id() ) && 'debited' === $held->get_meta( '_kudora_points_state' ) ) {
+			$balance += (int) $held->get_meta( '_kudora_points_debited' );
+		}
+		return $balance;
+	}
+
+	/**
+	 * Forget the redemption request once the checkout went through.
+	 *
+	 * @return void
+	 */
+	public static function clear_session() {
+		if ( function_exists( 'WC' ) && WC()->session ) {
+			WC()->session->set( self::SESSION_REQUEST, null );
+			WC()->session->set( self::SESSION_APPLIED, null );
+		}
+	}
+
+	/**
+	 * Deduct the points when the order is placed. A reused order (payment retried)
+	 * that already holds the same points keeps them. When the balance no longer
+	 * covers them the points discount is removed from the order (it must not stay
+	 * payable at the reduced total) and the checkout shows the error.
 	 *
 	 * @param WC_Order $order Order.
 	 * @return void
@@ -492,21 +560,26 @@ class Kudora_Loyalty_Redeem {
 	 */
 	public function debit_order( $order ) {
 		$r = self::order_redeem( $order );
-		if ( $r['points'] <= 0 || 'debited' === $order->get_meta( '_kudora_points_state' ) ) {
+		if ( $r['points'] <= 0 ) {
 			return;
+		}
+		if ( 'debited' === $order->get_meta( '_kudora_points_state' ) ) {
+			if ( (int) $order->get_meta( '_kudora_points_debited' ) === $r['points'] ) {
+				Kudora_Order_Lifecycle::remember_held( $order );
+				return;
+			}
+			$this->restore_order( $order, 'changed' );
 		}
 		$res = self::debit( $order, $r['points'] );
 		if ( is_wp_error( $res ) ) {
+			self::drop_points( $order );
 			$message = __( 'Your points balance changed. Please review your order and try again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' );
 			if ( defined( 'REST_REQUEST' ) && REST_REQUEST && class_exists( '\Automattic\WooCommerce\StoreApi\Exceptions\RouteException' ) ) {
 				throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException( 'kudora_points_balance', esc_html( $message ), 400 );
 			}
 			throw new Exception( esc_html( $message ) );
 		}
-		if ( WC()->session ) {
-			WC()->session->set( self::SESSION_REQUEST, null );
-			WC()->session->set( self::SESSION_APPLIED, null );
-		}
+		Kudora_Order_Lifecycle::remember_held( $order );
 	}
 
 	/**
@@ -533,6 +606,8 @@ class Kudora_Loyalty_Redeem {
 		$order->update_meta_data( '_kudora_points_round', $round );
 		if ( ! is_wp_error( $res ) ) {
 			$order->update_meta_data( '_kudora_points_state', 'debited' );
+			$order->update_meta_data( '_kudora_points_debited', (int) $points );
+			$order->delete_meta_data( '_kudora_points_shortfall' );
 			/* translators: %s: points */
 			$order->add_order_note( sprintf( __( 'Customer used %s.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), self::format_points( $points ) ) );
 		}
@@ -541,7 +616,53 @@ class Kudora_Loyalty_Redeem {
 	}
 
 	/**
-	 * Give the points back when the order is voided.
+	 * Take the points of an unpaid order again if they were given back; when the
+	 * customer no longer has them, remove the points discount (full total).
+	 *
+	 * @param WC_Order $order Order.
+	 * @return true|WP_Error WP_Error when the discount was removed.
+	 */
+	public static function secure( $order ) {
+		$r = self::order_redeem( $order );
+		if ( $r['points'] <= 0 || 'debited' === $order->get_meta( '_kudora_points_state' ) ) {
+			return true;
+		}
+		$res = self::debit( $order, $r['points'] );
+		if ( ! is_wp_error( $res ) ) {
+			return true;
+		}
+		self::drop_points( $order );
+		return $res;
+	}
+
+	/**
+	 * Remove the points discount from an unpaid order (recalculates its total).
+	 *
+	 * @param WC_Order $order Order.
+	 * @return void
+	 */
+	protected static function drop_points( $order ) {
+		$order->remove_coupon( self::CODE );
+		$order->update_meta_data( '_kudora_points_state', 'dropped' );
+		$order->save();
+		$order->add_order_note( __( 'The customer no longer had enough points, so the points discount was removed and the order total updated.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
+	}
+
+	/**
+	 * Order-pay page: secure the points before the customer pays.
+	 *
+	 * @param WC_Order $order  Order.
+	 * @param WP_Error $errors Collected errors.
+	 * @return void
+	 */
+	public function before_payment( $order, $errors ) {
+		if ( is_wp_error( self::secure( $order ) ) ) {
+			$errors->add( 'kudora_points', __( 'You no longer have enough points for this order, so the points discount was removed and the total updated. Please check the total before paying.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
+		}
+	}
+
+	/**
+	 * Give the points back when the order is voided or released.
 	 *
 	 * @param WC_Order $order  Order.
 	 * @param string   $reason Reason.
@@ -551,11 +672,17 @@ class Kudora_Loyalty_Redeem {
 		if ( 'debited' !== $order->get_meta( '_kudora_points_state' ) ) {
 			return;
 		}
-		$r     = self::order_redeem( $order );
+		// What was actually deducted, even if the coupon line was removed since.
+		$points = (int) $order->get_meta( '_kudora_points_debited' );
+		if ( $points <= 0 ) {
+			$recorded = $order->get_meta( '_kudora_points_redeem' );
+			$points   = is_array( $recorded ) ? (int) $recorded['points'] : 0;
+		}
 		$round = (int) $order->get_meta( '_kudora_points_round' );
-		Kudora_Points_Repo::add(
+		Kudora_Points_Repo::restore(
 			$order->get_customer_id(),
-			$r['points'],
+			sprintf( 'order:%d:redeem:%d', $order->get_id(), $round ),
+			$points,
 			'restored',
 			array(
 				'entity_type' => 'order',
@@ -563,18 +690,17 @@ class Kudora_Loyalty_Redeem {
 				/* translators: %s: order number */
 				'note'        => sprintf( __( 'Order #%s', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), $order->get_order_number() ),
 				'key'         => sprintf( 'order:%d:redeem-restore:%d', $order->get_id(), $round ),
-				'lifetime'    => false,
 			)
 		);
 		$order->update_meta_data( '_kudora_points_state', 'restored' );
 		$order->save_meta_data();
 		/* translators: %s: points */
-		$order->add_order_note( sprintf( __( '%s returned to the customer.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), self::format_points( $r['points'] ) ) );
+		$order->add_order_note( sprintf( __( '%s returned to the customer.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), self::format_points( $points ) ) );
 	}
 
 	/**
-	 * Reinstated order: deduct again; if the customer no longer has the points and
-	 * the order is unpaid, remove the points discount so they pay in full.
+	 * Reinstated to an unpaid status: take the points again, or drop the discount.
+	 * (Coming back to a paid status is handled by on_paid().)
 	 *
 	 * @param WC_Order $order Order.
 	 * @param string   $from  Old status.
@@ -582,22 +708,31 @@ class Kudora_Loyalty_Redeem {
 	 * @return void
 	 */
 	public function reinstate_order( $order, $from, $to ) {
+		if ( in_array( $to, wc_get_is_paid_statuses(), true ) ) {
+			return;
+		}
+		self::secure( $order );
+	}
+
+	/**
+	 * Paid while its points were given back: take them again; if the customer no
+	 * longer has them, the payment already happened, so flag it for the shop.
+	 *
+	 * @param WC_Order $order Order.
+	 * @return void
+	 */
+	public function on_paid( $order ) {
 		$r = self::order_redeem( $order );
-		if ( $r['points'] <= 0 || 'restored' !== $order->get_meta( '_kudora_points_state' ) ) {
+		if ( $r['points'] <= 0 || 'restored' !== $order->get_meta( '_kudora_points_state' ) || (float) $order->get_total_refunded() > 0 ) {
 			return;
 		}
-		$res = self::debit( $order, $r['points'] );
-		if ( ! is_wp_error( $res ) ) {
+		if ( ! is_wp_error( self::debit( $order, $r['points'] ) ) ) {
 			return;
 		}
-		if ( in_array( $to, array( 'pending', 'on-hold' ), true ) ) {
-			$order->remove_coupon( self::CODE );
-			$order->update_meta_data( '_kudora_points_state', 'dropped' );
-			$order->save();
-			$order->add_order_note( __( 'The customer no longer had enough points, so the points discount was removed and the order total updated.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
-		} else {
-			$order->add_order_note( __( 'Warning: the points used on this order could not be deducted again after it was reinstated.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
-		}
+		$order->update_meta_data( '_kudora_points_shortfall', $r['points'] );
+		$order->save_meta_data();
+		/* translators: %s: points */
+		$order->add_order_note( sprintf( __( 'Warning: this order was paid, but the %s it used could not be deducted again (the customer no longer has them).', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), self::format_points( $r['points'] ) ) );
 	}
 
 	/**
@@ -639,7 +774,7 @@ class Kudora_Loyalty_Redeem {
 		if ( ! $user_id ) {
 			return 0;
 		}
-		$r = self::compute( self::eligible_subtotal(), Kudora_Points_Repo::balance( $user_id ), null );
+		$r = self::compute( self::eligible_subtotal(), self::available( $user_id ), null );
 		return $r['points'];
 	}
 
@@ -658,7 +793,7 @@ class Kudora_Loyalty_Redeem {
 		$data['points'] = array(
 			'enabled'     => $s['enabled'],
 			'logged_in'   => (bool) $user_id,
-			'balance'     => $user_id ? Kudora_Points_Repo::balance( $user_id ) : 0,
+			'balance'     => $user_id ? self::available( $user_id ) : 0,
 			'mode'        => $s['mode'],
 			'request'     => $req['mode'],
 			'applied'     => array(
@@ -709,7 +844,7 @@ class Kudora_Loyalty_Redeem {
 		if ( ! $user_id ) {
 			return new WP_Error( 'kudora_points_login', __( 'Please log in to use your points.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
-		$r = self::compute( self::eligible_subtotal(), Kudora_Points_Repo::balance( $user_id ), (int) $points );
+		$r = self::compute( self::eligible_subtotal(), self::available( $user_id ), (int) $points );
 		if ( '' !== $r['error'] ) {
 			return new WP_Error( 'kudora_points_invalid', $r['error'] );
 		}
@@ -730,7 +865,7 @@ class Kudora_Loyalty_Redeem {
 		if ( ! $s['enabled'] || ! is_user_logged_in() ) {
 			return;
 		}
-		$balance = Kudora_Points_Repo::balance( get_current_user_id() );
+		$balance = self::available( get_current_user_id() );
 		$applied = self::applied();
 		$active  = WC()->cart && in_array( self::CODE, WC()->cart->get_applied_coupons(), true );
 		if ( $balance <= 0 && ! $active ) {

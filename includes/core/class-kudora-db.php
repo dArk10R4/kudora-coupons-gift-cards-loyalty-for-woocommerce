@@ -45,13 +45,37 @@ class Kudora_DB {
 
 	/**
 	 * Run a callback inside a transaction. Any exception rolls the whole (outermost)
-	 * transaction back and is re-thrown.
+	 * transaction back and is re-thrown. An outermost transaction that lost a
+	 * deadlock (InnoDB already rolled it back) is run again, up to twice.
 	 *
 	 * @param callable $callback Work to do.
 	 * @return mixed Callback result.
 	 * @throws Throwable Re-thrown from the callback.
 	 */
 	public static function transaction( $callback ) {
+		if ( 0 !== self::$depth ) {
+			return self::run_transaction( $callback );
+		}
+		for ( $try = 1; ; $try++ ) {
+			try {
+				return self::run_transaction( $callback );
+			} catch ( RuntimeException $e ) {
+				if ( $try >= 3 || ! preg_match( '/Deadlock found|Lock wait timeout/i', $e->getMessage() ) ) {
+					throw $e;
+				}
+				usleep( wp_rand( 20000, 80000 ) );
+			}
+		}
+	}
+
+	/**
+	 * One transaction attempt.
+	 *
+	 * @param callable $callback Work to do.
+	 * @return mixed Callback result.
+	 * @throws Throwable Re-thrown from the callback.
+	 */
+	protected static function run_transaction( $callback ) {
 		global $wpdb;
 		$outer = ( 0 === self::$depth );
 		if ( $outer ) {

@@ -71,6 +71,7 @@
 .kudora-order-box h4 { margin: 12px 0 4px; }
 .kudora-order-box ul { margin: 0; }
 .kudora-order-box li { margin-bottom: 8px; }
+.kudora-order-box .kudora-warning { color: #8a2424; border-left: 3px solid #d63638; padding-left: 8px; }
 .kudora-inline-form { display: inline-flex; gap: 4px; margin-top: 4px; }
 .kudora-inline-form input { width: 80px; }
 .kudora-code-preview { font-size: 14px; }

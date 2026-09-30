@@ -250,6 +250,7 @@ class Kudora_Points_Repo {
 		try {
 			$id = Kudora_DB::transaction(
 				function () use ( $wpdb, $user_id, $points, $action, $opts, $expires, $lifetime ) {
+					self::lock_user( $user_id );
 					$id = self::write_ledger( $user_id, $points, $points, $action, $opts, $expires );
 					if ( 0 === $id ) {
 						return 0;
@@ -277,7 +278,7 @@ class Kudora_Points_Repo {
 	 * @param int    $points  Positive points.
 	 * @param string $action  Ledger action.
 	 * @param array  $opts    entity_type, entity_id, note, key, lifetime (bool: also lower lifetime earned).
-	 * @return true|WP_Error True also when replayed.
+	 * @return true|WP_Error True also when the key was already used (see key_used()).
 	 */
 	public static function deduct( $user_id, $points, $action, array $opts = array() ) {
 		global $wpdb;
@@ -300,6 +301,7 @@ class Kudora_Points_Repo {
 		try {
 			Kudora_DB::transaction(
 				function () use ( $wpdb, $user_id, $points, $action, $opts ) {
+					self::lock_user( $user_id );
 					$id = self::write_ledger( $user_id, -$points, 0, $action, $opts, null );
 					if ( 0 === $id ) {
 						return;
@@ -307,10 +309,18 @@ class Kudora_Points_Repo {
 					$table = self::table();
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, conditional atomic debit.
 					$affected = $wpdb->query( $wpdb->prepare( "UPDATE %i SET balance = balance - %d, lifetime_earned = GREATEST(0, lifetime_earned - %d), last_activity_at = %s, updated_at = %s WHERE user_id = %d AND balance >= %d", $table, $points, $opts['lifetime'] ? $points : 0, Kudora_DB::now(), Kudora_DB::now(), $user_id, $points ) );
+					Kudora_DB::check( $affected, 'points debit' );
 					if ( 1 !== (int) $affected ) {
 						throw new DomainException( 'insufficient' );
 					}
-					self::consume_lots( $user_id, $points );
+					$lots = self::consume_lots( $user_id, $points );
+					if ( $lots ) {
+						// Kept on the debit row so restore() can give the points back to the
+						// same lots, with their original expiry.
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table.
+						$ok = $wpdb->query( $wpdb->prepare( 'UPDATE %i SET lots = %s WHERE id = %d', self::ledger_table(), wp_json_encode( $lots ), $id ) );
+						Kudora_DB::check( $ok, 'points debit lots' );
+					}
 					self::sync_tier( $user_id );
 				}
 			);
@@ -369,7 +379,11 @@ class Kudora_Points_Repo {
 		$table  = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
 		$wpdb->query( $wpdb->prepare( "UPDATE %i SET lifetime_earned = GREATEST(0, lifetime_earned - %d) WHERE user_id = %d", $table, $points, $user_id ) );
-		self::sync_tier( $user_id );
+		try {
+			self::sync_tier( $user_id );
+		} catch ( RuntimeException $e ) {
+			self::$rows = array();
+		}
 		self::after_change( $user_id, $before );
 	}
 
@@ -378,14 +392,16 @@ class Kudora_Points_Repo {
 	 *
 	 * @param int $user_id User id.
 	 * @param int $points  Points to consume.
-	 * @return void
+	 * @return array<int,int> Lot id => points taken from it.
 	 */
 	protected static function consume_lots( $user_id, $points ) {
 		global $wpdb;
 		$ledger = self::ledger_table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, locked rows.
 		$lots = $wpdb->get_results( $wpdb->prepare( "SELECT id, remaining FROM %i WHERE user_id = %d AND remaining > 0 ORDER BY (expires_at IS NULL) ASC, expires_at ASC, id ASC FOR UPDATE", $ledger, $user_id ), ARRAY_A );
-		$left = $points;
+		Kudora_DB::check( $lots, 'points lots' );
+		$left  = $points;
+		$taken = array();
 		foreach ( (array) $lots as $lot ) {
 			if ( $left <= 0 ) {
 				break;
@@ -393,8 +409,116 @@ class Kudora_Points_Repo {
 			$use   = min( $left, (int) $lot['remaining'] );
 			$left -= $use;
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-			$wpdb->query( $wpdb->prepare( "UPDATE %i SET remaining = remaining - %d WHERE id = %d", $ledger, $use, $lot['id'] ) );
+			$ok = $wpdb->query( $wpdb->prepare( "UPDATE %i SET remaining = remaining - %d WHERE id = %d", $ledger, $use, $lot['id'] ) );
+			Kudora_DB::check( $ok, 'points lot' );
+			$taken[ (int) $lot['id'] ] = $use;
 		}
+		return $taken;
+	}
+
+	/**
+	 * Take the customer's balance row lock first in every points transaction, so
+	 * all of them lock in the same order (balance row, then ledger rows) and cannot
+	 * deadlock each other. Creates the row when missing.
+	 *
+	 * @param int $user_id User id.
+	 * @return void
+	 */
+	protected static function lock_user( $user_id ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table, row lock.
+		$ok = $wpdb->query( $wpdb->prepare( "INSERT INTO %i (user_id, balance, lifetime_earned, tier_id, updated_at) VALUES (%d, 0, 0, '', %s) ON DUPLICATE KEY UPDATE user_id = user_id", self::table(), $user_id, Kudora_DB::now() ) );
+		Kudora_DB::check( $ok, 'points row lock' );
+	}
+
+	/**
+	 * Give back the points of an earlier debit, into the lots they were taken from
+	 * (keeping those lots' expiry dates; a lot that expired meanwhile expires again
+	 * on the next daily run). Idempotent on the key.
+	 *
+	 * @param int    $user_id   User id.
+	 * @param string $debit_key Idempotency key of the debit being returned.
+	 * @param int    $points    Points to return (at most what that debit took).
+	 * @param string $action    Ledger action.
+	 * @param array  $opts      entity_type, entity_id, note, key.
+	 * @return int Ledger id, 0 when replayed or nothing to do.
+	 */
+	public static function restore( $user_id, $debit_key, $points, $action, array $opts = array() ) {
+		global $wpdb;
+		$user_id = (int) $user_id;
+		$points  = (int) $points;
+		if ( $user_id <= 0 || $points <= 0 ) {
+			return 0;
+		}
+		$opts   = wp_parse_args(
+			$opts,
+			array(
+				'entity_type' => '',
+				'entity_id'   => 0,
+				'note'        => '',
+				'key'         => null,
+			)
+		);
+		$before = self::row( $user_id, true );
+		try {
+			$id = Kudora_DB::transaction(
+				function () use ( $wpdb, $user_id, $points, $action, $opts, $debit_key ) {
+					self::lock_user( $user_id );
+					$ledger = self::ledger_table();
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table, locked row.
+					$debit = $wpdb->get_row( $wpdb->prepare( 'SELECT id, points, lots FROM %i WHERE idempotency_key = %s AND user_id = %d FOR UPDATE', $ledger, substr( (string) $debit_key, 0, 120 ), $user_id ), ARRAY_A );
+					$lots  = $debit && $debit['lots'] ? json_decode( $debit['lots'], true ) : null;
+					if ( ! is_array( $lots ) ) {
+						// Unknown debit (or one made before lots were recorded): a new lot.
+						$id = self::write_ledger( $user_id, $points, $points, $action, $opts, self::default_expiry() );
+					} else {
+						$id = self::write_ledger( $user_id, $points, 0, $action, $opts, null );
+						if ( 0 !== $id ) {
+							$left = $points;
+							foreach ( $lots as $lot_id => $used ) {
+								$give = min( $left, (int) $used );
+								if ( $give <= 0 ) {
+									continue;
+								}
+								// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table.
+								$ok = $wpdb->query( $wpdb->prepare( 'UPDATE %i SET remaining = LEAST(points, remaining + %d), warned = 0 WHERE id = %d AND user_id = %d', $ledger, $give, (int) $lot_id, $user_id ) );
+								Kudora_DB::check( $ok, 'points restore lot' );
+								$left -= $give;
+							}
+							if ( $left > 0 ) {
+								// More than the lots can take back (should not happen): keep it as its own lot.
+								// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table.
+								$ok = $wpdb->query( $wpdb->prepare( 'UPDATE %i SET remaining = %d, expires_at = %s WHERE id = %d', $ledger, $left, self::default_expiry(), $id ) );
+								Kudora_DB::check( $ok, 'points restore rest' );
+							}
+						}
+					}
+					if ( 0 === $id ) {
+						return 0;
+					}
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table.
+					$ok = $wpdb->query( $wpdb->prepare( 'UPDATE %i SET balance = balance + %d, last_activity_at = %s, updated_at = %s WHERE user_id = %d', self::table(), $points, Kudora_DB::now(), Kudora_DB::now(), $user_id ) );
+					Kudora_DB::check( $ok, 'points restore' );
+					self::sync_tier( $user_id );
+					return $id;
+				}
+			);
+		} catch ( RuntimeException $e ) {
+			self::$rows = array();
+			$id         = 0;
+		}
+		self::after_change( $user_id, $before );
+		return (int) $id;
+	}
+
+	/**
+	 * Expiry for a new lot, or null when points never expire.
+	 *
+	 * @return string|null
+	 */
+	protected static function default_expiry() {
+		$days = Kudora_Settings::int( 'loyalty_expiry_days' );
+		return $days > 0 ? gmdate( 'Y-m-d H:i:s', time() + $days * DAY_IN_SECONDS ) : null;
 	}
 
 	/**
@@ -427,6 +551,20 @@ class Kudora_Points_Repo {
 	}
 
 	/**
+	 * Whether a ledger row with this idempotency key exists (deduct()/add() treat a
+	 * replayed key as done, so callers that must tell a replay apart ask first).
+	 *
+	 * @param string $key Idempotency key.
+	 * @return bool
+	 */
+	public static function key_used( $key ) {
+		global $wpdb;
+		$ledger = self::ledger_table();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table, must read the live row.
+		return (bool) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM %i WHERE idempotency_key = %s LIMIT 1', $ledger, substr( (string) $key, 0, 120 ) ) );
+	}
+
+	/**
 	 * Recalculate and store the tier.
 	 *
 	 * @param int $user_id User id.
@@ -441,7 +579,8 @@ class Kudora_Points_Repo {
 		if ( $tier_id !== (string) $row['tier_id'] ) {
 			$table = self::table();
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-			$wpdb->query( $wpdb->prepare( "UPDATE %i SET tier_id = %s WHERE user_id = %d", $table, $tier_id, $user_id ) );
+			$ok = $wpdb->query( $wpdb->prepare( "UPDATE %i SET tier_id = %s WHERE user_id = %d", $table, $tier_id, $user_id ) );
+			Kudora_DB::check( $ok, 'tier' );
 		}
 		self::$rows = array();
 	}
@@ -479,17 +618,35 @@ class Kudora_Points_Repo {
 	}
 
 	/**
-	 * Recompute every customer's stored tier (after tiers are edited).
+	 * Recompute every customer's stored tier (after tiers are edited): the first
+	 * batch now, the rest in the background, so big stores never time out.
 	 *
 	 * @return void
 	 */
 	public static function resync_all_tiers() {
+		self::resync_tiers_batch( 0 );
+	}
+
+	/**
+	 * Re-tier the next 500 customers after a user id; queue the next batch.
+	 *
+	 * @param int $after User id to continue after.
+	 * @return void
+	 */
+	public static function resync_tiers_batch( $after = 0 ) {
 		global $wpdb;
 		$table = self::table();
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT user_id FROM %i", $table ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table, batched.
+		$ids = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( 'SELECT user_id FROM %i WHERE user_id > %d ORDER BY user_id ASC LIMIT 500', $table, (int) $after ) ) );
 		foreach ( $ids as $id ) {
-			self::sync_tier( (int) $id );
+			try {
+				self::sync_tier( $id );
+			} catch ( RuntimeException $e ) {
+				self::$rows = array();
+			}
+		}
+		if ( 500 === count( $ids ) ) {
+			Kudora_Scheduler::async( 'kudora_resync_tiers', array( end( $ids ) ) );
 		}
 	}
 
@@ -515,13 +672,15 @@ class Kudora_Points_Repo {
 			$before  = self::row( $user_id, true );
 			try {
 				$did = Kudora_DB::transaction(
-					function () use ( $wpdb, $ledger, $lot, $user_id ) {
+					function () use ( $wpdb, $ledger, $lot, $user_id, $now ) {
+						self::lock_user( $user_id );
 						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- locked row.
-						$remaining = (int) $wpdb->get_var( $wpdb->prepare( "SELECT remaining FROM %i WHERE id = %d FOR UPDATE", $ledger, $lot['id'] ) );
+						$remaining = (int) $wpdb->get_var( $wpdb->prepare( "SELECT remaining FROM %i WHERE id = %d AND expires_at <= %s FOR UPDATE", $ledger, $lot['id'], $now ) );
+						Kudora_DB::check( true, 'expiry lot' );
 						if ( $remaining <= 0 ) {
 							return false;
 						}
-						$id = self::write_ledger(
+						self::write_ledger(
 							$user_id,
 							-$remaining,
 							0,
@@ -530,18 +689,17 @@ class Kudora_Points_Repo {
 								'entity_type' => 'lot',
 								'entity_id'   => (int) $lot['id'],
 								'note'        => '',
-								'key'         => 'expire:lot:' . (int) $lot['id'],
+								'key'         => null,
 							),
 							null
 						);
-						if ( 0 === $id ) {
-							return false;
-						}
 						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-						$wpdb->query( $wpdb->prepare( "UPDATE %i SET remaining = 0 WHERE id = %d", $ledger, $lot['id'] ) );
+						$ok = $wpdb->query( $wpdb->prepare( "UPDATE %i SET remaining = 0 WHERE id = %d", $ledger, $lot['id'] ) );
+						Kudora_DB::check( $ok, 'expire lot' );
 						$table = self::table();
 						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-						$wpdb->query( $wpdb->prepare( "UPDATE %i SET balance = GREATEST(0, balance - %d), updated_at = %s WHERE user_id = %d", $table, $remaining, Kudora_DB::now(), $user_id ) );
+						$ok = $wpdb->query( $wpdb->prepare( "UPDATE %i SET balance = GREATEST(0, balance - %d), updated_at = %s WHERE user_id = %d", $table, $remaining, Kudora_DB::now(), $user_id ) );
+						Kudora_DB::check( $ok, 'expire balance' );
 						self::sync_tier( $user_id );
 						return true;
 					}

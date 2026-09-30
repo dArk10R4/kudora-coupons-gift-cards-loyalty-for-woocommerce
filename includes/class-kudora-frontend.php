@@ -119,7 +119,7 @@ class Kudora_Frontend {
 		// A module was switched on after the last flush: flush once (guarded).
 		if ( $missing && ! get_transient( 'kudora_flushed_recently' ) ) {
 			set_transient( 'kudora_flushed_recently', 1, HOUR_IN_SECONDS );
-			update_option( 'kudora_flush_rewrite', 1 );
+			update_option( 'kudora_flush_rewrite', 1, true );
 		}
 	}
 

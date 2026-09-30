@@ -33,6 +33,8 @@ class Kudora_Loyalty_Earn {
 		add_action( 'comment_post', array( $this, 'review_posted' ), 20, 3 );
 		add_action( 'transition_comment_status', array( $this, 'review_status' ), 20, 3 );
 		add_action( 'kudora_daily_tasks', array( $this, 'birthdays' ) );
+		add_action( 'kudora_expire_points', array( $this, 'expire_batch' ) );
+		add_action( 'kudora_expiry_warnings', array( $this, 'warning_batch' ) );
 
 		add_action( 'woocommerce_edit_account_form', array( $this, 'birthday_field' ) );
 		add_action( 'woocommerce_save_account_details', array( $this, 'save_birthday' ) );
@@ -279,10 +281,17 @@ class Kudora_Loyalty_Earn {
 		if ( $points <= 0 ) {
 			return 0;
 		}
+		// Refunds made before the earn status was reached count as already reversed,
+		// so later refunds keep taking back the right share.
+		$pre = min( $points, (int) round( $points * self::refunded_share( $order ) ) );
+		$net = $points - $pre;
+		if ( $net <= 0 ) {
+			return 0;
+		}
 		$round = (int) $order->get_meta( '_kudora_earn_round' ) + 1;
 		$id    = Kudora_Points_Repo::add(
 			$user_id,
-			$points,
+			$net,
 			'earned',
 			array(
 				'entity_type' => 'order',
@@ -298,12 +307,26 @@ class Kudora_Loyalty_Earn {
 		$order->update_meta_data( '_kudora_earn_round', $round );
 		$order->update_meta_data( '_kudora_earn_state', 'earned' );
 		$order->update_meta_data( '_kudora_points_earned', $points );
-		$order->update_meta_data( '_kudora_points_reversed', 0 );
+		$order->update_meta_data( '_kudora_points_reversed', $pre );
 		$order->save_meta_data();
 		/* translators: %s: points */
-		$order->add_order_note( sprintf( __( 'Customer earned %s.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Loyalty_Redeem::format_points( $points ) ) );
-		Kudora_Emails::send( 'Kudora_Email_Points_Earned', $user_id, $points, $order->get_id() );
-		return $points;
+		$order->add_order_note( sprintf( __( 'Customer earned %s.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Loyalty_Redeem::format_points( $net ) ) );
+		Kudora_Emails::send( 'Kudora_Email_Points_Earned', $user_id, $net, $order->get_id() );
+		return $net;
+	}
+
+	/**
+	 * Share of what the customer paid (money + gift cards) that was refunded.
+	 *
+	 * @param WC_Order $order Order.
+	 * @return float 0..1
+	 */
+	protected static function refunded_share( $order ) {
+		$gc       = Kudora_Gift_Card_Redeem::order_amount( $order );
+		$gc_back  = array_sum( array_map( 'floatval', (array) $order->get_meta( '_kudora_gc_refunded' ) ) );
+		$paid     = (float) $order->get_total() + $gc;
+		$refunded = (float) $order->get_total_refunded() + $gc_back;
+		return $paid > 0 ? max( 0.0, min( 1.0, $refunded / $paid ) ) : 0.0;
 	}
 
 	/**
@@ -355,12 +378,8 @@ class Kudora_Loyalty_Earn {
 		$earned   = (int) $order->get_meta( '_kudora_points_earned' );
 		$reversed = (int) $order->get_meta( '_kudora_points_reversed' );
 		if ( $refund ) {
-			// Share of everything the customer paid (money + gift cards) that was refunded.
-			$gc       = Kudora_Gift_Card_Redeem::order_amount( $order );
-			$gc_back  = array_sum( array_map( 'floatval', (array) $order->get_meta( '_kudora_gc_refunded' ) ) );
-			$paid     = (float) $order->get_total() + $gc;
-			$refunded = (float) $order->get_total_refunded() + $gc_back;
-			$share    = $paid > 0 ? min( 1.0, $refunded / $paid ) : 1.0;
+			$paid   = (float) $order->get_total() + Kudora_Gift_Card_Redeem::order_amount( $order );
+			$share  = $paid > 0 ? self::refunded_share( $order ) : 1.0;
 			$target = (int) round( $earned * $share );
 			$delta  = max( 0, min( $earned, $target ) - $reversed );
 		} else {
@@ -400,6 +419,37 @@ class Kudora_Loyalty_Earn {
 	/* ---------------------------------------------------------------------
 	 * Actions
 	 * ------------------------------------------------------------------- */
+
+	/**
+	 * Expire due lots, 500 at a time; a full batch queues the next one, so any
+	 * backlog is cleared the same day instead of staying redeemable.
+	 *
+	 * @return void
+	 */
+	public function expire_batch() {
+		if ( Kudora_Points_Repo::expire_due( 500 ) >= 500 ) {
+			Kudora_Scheduler::async( 'kudora_expire_points' );
+		}
+	}
+
+	/**
+	 * Expiry warning emails, 500 customers at a time (each is marked as warned).
+	 *
+	 * @return void
+	 */
+	public function warning_batch() {
+		$warn = Kudora_Settings::int( 'loyalty_expiry_warning_days' );
+		if ( $warn <= 0 || Kudora_Settings::int( 'loyalty_expiry_days' ) <= 0 ) {
+			return;
+		}
+		$batch = Kudora_Points_Repo::collect_expiry_warnings( $warn );
+		foreach ( $batch as $user_id => $info ) {
+			Kudora_Emails::send( 'Kudora_Email_Points_Expiring', $user_id, $info['points'], $info['date'] );
+		}
+		if ( count( $batch ) >= 500 ) {
+			Kudora_Scheduler::async( 'kudora_expiry_warnings' );
+		}
+	}
 
 	/**
 	 * Sign-up bonus for new customers.
@@ -503,13 +553,8 @@ class Kudora_Loyalty_Earn {
 	 * @return void
 	 */
 	public function birthdays() {
-		Kudora_Points_Repo::expire_due();
-		$warn = Kudora_Settings::int( 'loyalty_expiry_warning_days' );
-		if ( $warn > 0 && Kudora_Settings::int( 'loyalty_expiry_days' ) > 0 ) {
-			foreach ( Kudora_Points_Repo::collect_expiry_warnings( $warn ) as $user_id => $info ) {
-				Kudora_Emails::send( 'Kudora_Email_Points_Expiring', $user_id, $info['points'], $info['date'] );
-			}
-		}
+		$this->expire_batch();
+		$this->warning_batch();
 
 		$points = Kudora_Settings::int( 'loyalty_birthday_points' );
 		if ( $points <= 0 ) {

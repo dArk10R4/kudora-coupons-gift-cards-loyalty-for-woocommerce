@@ -26,6 +26,7 @@ class Kudora_Loyalty {
 		( new Kudora_Referrals() )->register();
 		( new Kudora_Loyalty_Frontend() )->register();
 		add_action( 'kudora_tier_changed', array( $this, 'tier_changed' ), 10, 3 );
+		add_action( 'kudora_resync_tiers', array( 'Kudora_Points_Repo', 'resync_tiers_batch' ) );
 	}
 
 	/**

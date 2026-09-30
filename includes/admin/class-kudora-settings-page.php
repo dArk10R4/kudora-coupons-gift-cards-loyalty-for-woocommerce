@@ -508,7 +508,7 @@ class Kudora_Settings_Page extends WC_Settings_Page {
 	 * @return void
 	 */
 	public function after_save() {
-		update_option( 'kudora_flush_rewrite', 1 );
+		update_option( 'kudora_flush_rewrite', 1, true );
 		delete_transient( 'kudora_flushed_recently' );
 	}
 }

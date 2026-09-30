@@ -66,8 +66,12 @@ class Kudora_Gift_Card_Redeem {
 
 		add_action( 'kudora_order_placed', array( $this, 'debit_order' ), 10 );
 		add_action( 'kudora_order_voided', array( $this, 'restore_order' ), 10, 2 );
+		add_action( 'kudora_order_release', array( $this, 'restore_order' ), 10, 2 );
 		add_action( 'kudora_order_reinstated', array( $this, 'reinstate_order' ), 10, 3 );
+		add_action( 'kudora_order_before_payment', array( $this, 'before_payment' ), 10, 2 );
+		add_action( 'kudora_order_paid', array( $this, 'on_paid' ), 5 );
 		add_action( 'kudora_order_refunded', array( $this, 'refunded' ), 10, 3 );
+		add_action( 'kudora_checkout_done', array( __CLASS__, 'clear_session' ), 10, 0 );
 
 		add_filter( 'woocommerce_get_order_item_totals', array( $this, 'order_item_totals' ), 20, 2 );
 
@@ -82,6 +86,7 @@ class Kudora_Gift_Card_Redeem {
 			add_filter( 'woocommerce_coupon_is_valid', array( $this, 'handoff_validate' ), 20, 2 );
 			add_action( 'woocommerce_applied_coupon', array( $this, 'handoff_applied' ), 5 );
 			add_filter( 'woocommerce_coupon_message', array( $this, 'handoff_message' ), 20, 3 );
+			add_filter( 'woocommerce_coupon_error', array( $this, 'handoff_miss' ), 20, 3 );
 		}
 
 		// Classic cart/checkout UI.
@@ -191,15 +196,15 @@ class Kudora_Gift_Card_Redeem {
 		if ( '' === $code ) {
 			return new WP_Error( 'kudora_gc_empty', __( 'Please enter a gift card code.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
-		if ( ! self::rate_limit_ok() ) {
+		if ( ! self::lookup_allowed() ) {
 			return new WP_Error( 'kudora_gc_rate', __( 'Too many attempts. Please wait a few minutes and try again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
 		$card  = Kudora_Gift_Card_Repo::get_by_code( $code, true );
 		$error = '';
 		if ( ! Kudora_Gift_Card_Repo::is_usable( $card, $error ) ) {
-			self::count_failure();
 			return new WP_Error( 'kudora_gc_invalid', $error );
 		}
+		self::lookup_succeeded();
 		if ( WC()->cart && self::cart_has_gift_cards( WC()->cart ) && self::cart_only_gift_cards( WC()->cart ) ) {
 			return new WP_Error( 'kudora_gc_for_gc', __( 'Gift cards cannot be used to buy gift cards.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
@@ -236,33 +241,45 @@ class Kudora_Gift_Card_Redeem {
 	}
 
 	/**
-	 * Brute-force guard for code guessing: 10 failed lookups per 10 minutes per client.
+	 * Throttle scope for gift card code lookups.
+	 */
+	const THROTTLE = 'gc_code';
+
+	/**
+	 * Failed code lookups allowed per client every 10 minutes.
+	 *
+	 * @return int
+	 */
+	protected static function throttle_limit() {
+		return max( 3, Kudora_Settings::int( 'gc_balance_rate_limit' ) );
+	}
+
+	/**
+	 * Reserve a code lookup (atomic); false once the client used up its failures.
+	 * Call lookup_succeeded() when the code was valid.
 	 *
 	 * @return bool
 	 */
-	public static function rate_limit_ok() {
-		$limit = max( 3, Kudora_Settings::int( 'gc_balance_rate_limit' ) );
-		return (int) get_transient( self::rate_key() ) < $limit;
+	public static function lookup_allowed() {
+		return Kudora_Rate_Limit::attempt( self::THROTTLE, self::throttle_limit() );
 	}
 
 	/**
-	 * Record a failed lookup.
+	 * The reserved lookup found a card: give the attempt back.
 	 *
 	 * @return void
 	 */
-	public static function count_failure() {
-		$key = self::rate_key();
-		set_transient( $key, (int) get_transient( $key ) + 1, 10 * MINUTE_IN_SECONDS );
+	public static function lookup_succeeded() {
+		Kudora_Rate_Limit::release( self::THROTTLE );
 	}
 
 	/**
-	 * Per-client throttle key.
+	 * Whether the client is over the limit (check only, for the coupon field).
 	 *
-	 * @return string
+	 * @return bool
 	 */
-	protected static function rate_key() {
-		$ip = class_exists( 'WC_Geolocation' ) ? WC_Geolocation::get_ip_address() : '';
-		return 'kudora_gc_rl_' . md5( $ip . '|' . get_current_user_id() );
+	public static function lookups_blocked() {
+		return Kudora_Rate_Limit::count( self::THROTTLE ) >= self::throttle_limit();
 	}
 
 	/* ---------------------------------------------------------------------
@@ -322,6 +339,9 @@ class Kudora_Gift_Card_Redeem {
 		foreach ( $codes as $code ) {
 			$card  = Kudora_Gift_Card_Repo::get_by_code( $code );
 			$error = '';
+			if ( ! $caps ) {
+				$card = self::effective( $card );
+			}
 			if ( ! $caps && ! Kudora_Gift_Card_Repo::is_usable( $card, $error ) ) {
 				$dropped[ $code ] = $error;
 				continue;
@@ -389,7 +409,7 @@ class Kudora_Gift_Card_Redeem {
 			$lines[] = array(
 				'product' => $item->get_product(),
 				'amount'  => (float) $item->get_total() + (float) $item->get_total_tax(),
-				'is_gc'   => '' !== (string) $item->get_meta( '_kudora_gc_data' ),
+				'is_gc'   => is_array( $item->get_meta( '_kudora_gc_data' ) ),
 			);
 		}
 		return $lines;
@@ -532,6 +552,14 @@ class Kudora_Gift_Card_Redeem {
 			$sum = array_sum( wp_list_pluck( $applied, 'amount' ) );
 			$order->update_meta_data( '_kudora_gc_gross', Kudora_Money::round( $gross ) );
 			$order->set_total( max( 0.0, Kudora_Money::round( $gross - $sum ) ) );
+			// Edited below what the cards paid (items removed): the cards now paid more
+			// than the order needs. Shown in the order box so it can be refunded to them.
+			$excess = 'debited' === $state ? Kudora_Money::round( array_sum( $caps ) - $sum ) : 0.0;
+			if ( $excess > 0.00001 ) {
+				$order->update_meta_data( '_kudora_gc_excess', $excess );
+			} else {
+				$order->delete_meta_data( '_kudora_gc_excess' );
+			}
 			return;
 		}
 		$sum = array_sum( wp_list_pluck( $applied, 'amount' ) );
@@ -612,7 +640,7 @@ class Kudora_Gift_Card_Redeem {
 			return;
 		}
 		foreach ( self::order_cards( $order ) as $code => $a ) {
-			$card  = Kudora_Gift_Card_Repo::get_by_code( $code, true );
+			$card  = self::effective( Kudora_Gift_Card_Repo::get_by_code( $code, true ), $order );
 			$error = '';
 			if ( ! Kudora_Gift_Card_Repo::is_usable( $card, $error ) || $card['balance'] + 0.00001 < (float) $a['amount'] ) {
 				$errors->add( 'kudora_gift_card', $error ? $error : __( 'The gift card balance changed. Please review your order.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
@@ -628,7 +656,7 @@ class Kudora_Gift_Card_Redeem {
 	protected function validation_errors() {
 		$out = array();
 		foreach ( self::session_applied() as $code => $amount ) {
-			$card  = Kudora_Gift_Card_Repo::get_by_code( $code, true );
+			$card  = self::effective( Kudora_Gift_Card_Repo::get_by_code( $code, true ) );
 			$error = '';
 			if ( ! Kudora_Gift_Card_Repo::is_usable( $card, $error ) ) {
 				$out[] = $error;
@@ -644,7 +672,47 @@ class Kudora_Gift_Card_Redeem {
 	 * ------------------------------------------------------------------- */
 
 	/**
-	 * Debit the order's cards (once per round).
+	 * A card as this session sees it: money its own unpaid order (the held order)
+	 * holds counts as available, so retrying the payment of the same checkout
+	 * finds the same total.
+	 *
+	 * @param array|null    $card  Card.
+	 * @param WC_Order|null $order Order being validated (its own hold is not added).
+	 * @return array|null
+	 */
+	protected static function effective( $card, $order = null ) {
+		if ( ! $card ) {
+			return $card;
+		}
+		$held = Kudora_Order_Lifecycle::held_order();
+		if ( ! $held || ( $order && $held->get_id() === $order->get_id() ) || 'debited' !== $held->get_meta( '_kudora_gc_state' ) ) {
+			return $card;
+		}
+		foreach ( self::debited_cards( $held ) as $a ) {
+			if ( (int) $a['id'] === (int) $card['id'] ) {
+				$card['balance'] = Kudora_Money::round( $card['balance'] + (float) $a['amount'] );
+			}
+		}
+		return $card;
+	}
+
+	/**
+	 * What the current debit round took from each card.
+	 *
+	 * @param WC_Order $order Order.
+	 * @return array<string,array{id:int,amount:float}>
+	 */
+	protected static function debited_cards( $order ) {
+		$debited = $order->get_meta( '_kudora_gc_debited' );
+		return is_array( $debited ) ? $debited : self::order_cards( $order );
+	}
+
+	/**
+	 * Debit the order's cards when it is placed. A reused order (payment retried)
+	 * that already holds the same amounts keeps them; different amounts are given
+	 * back and taken again. When a card no longer covers its amount the cards are
+	 * dropped from the order (it must not stay payable at the reduced total) and
+	 * the checkout shows the error.
 	 *
 	 * @param WC_Order $order Order.
 	 * @return void
@@ -652,21 +720,26 @@ class Kudora_Gift_Card_Redeem {
 	 */
 	public function debit_order( $order ) {
 		$cards = self::order_cards( $order );
-		if ( ! $cards || 'debited' === $order->get_meta( '_kudora_gc_state' ) ) {
-			if ( $cards ) {
-				self::clear_session();
-			}
+		if ( ! $cards ) {
 			return;
+		}
+		if ( 'debited' === $order->get_meta( '_kudora_gc_state' ) ) {
+			if ( self::debited_cards( $order ) == $cards ) { // phpcs:ignore Universal.Operators.StrictComparisons.LooseEqual -- same cards and amounts, float/int agnostic.
+				Kudora_Order_Lifecycle::remember_held( $order );
+				return;
+			}
+			$this->restore_order( $order, 'changed' );
 		}
 		$result = self::debit_cards( $order, $cards );
 		if ( is_wp_error( $result ) ) {
+			self::drop_cards( $order );
 			$message = __( 'The balance of an applied gift card changed. Please review your order and try again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' );
 			if ( self::is_rest() && class_exists( '\Automattic\WooCommerce\StoreApi\Exceptions\RouteException' ) ) {
 				throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException( 'kudora_gift_card_balance', esc_html( $message ), 400 );
 			}
 			throw new Exception( esc_html( $message ) );
 		}
-		self::clear_session();
+		Kudora_Order_Lifecycle::remember_held( $order );
 	}
 
 	/**
@@ -695,6 +768,8 @@ class Kudora_Gift_Card_Redeem {
 		}
 		$order->update_meta_data( '_kudora_gc_round', $round );
 		$order->update_meta_data( '_kudora_gc_state', 'debited' );
+		$order->update_meta_data( '_kudora_gc_debited', $cards );
+		$order->delete_meta_data( '_kudora_gc_shortfall' );
 		$order->save_meta_data();
 
 		$lines = array();
@@ -704,6 +779,58 @@ class Kudora_Gift_Card_Redeem {
 		/* translators: %s: list of masked gift card codes and amounts */
 		$order->add_order_note( sprintf( __( 'Paid with gift card(s): %s', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), implode( ', ', $lines ) ) );
 		return true;
+	}
+
+	/**
+	 * Take the cards of an unpaid order again if they were given back (failed,
+	 * superseded, stale); when that is no longer possible, drop them so the order
+	 * total is the full amount.
+	 *
+	 * @param WC_Order $order Order.
+	 * @return true|WP_Error WP_Error when the cards were dropped.
+	 */
+	public static function secure( $order ) {
+		$cards = self::order_cards( $order );
+		if ( ! $cards || 'debited' === $order->get_meta( '_kudora_gc_state' ) ) {
+			return true;
+		}
+		$res = self::debit_cards( $order, $cards );
+		if ( ! is_wp_error( $res ) ) {
+			return true;
+		}
+		self::drop_cards( $order );
+		return $res;
+	}
+
+	/**
+	 * Remove the cards from an unpaid order: the total becomes the full amount.
+	 *
+	 * @param WC_Order $order Order.
+	 * @return void
+	 */
+	protected static function drop_cards( $order ) {
+		$gross = (float) $order->get_meta( '_kudora_gc_gross' );
+		$order->delete_meta_data( '_kudora_gift_cards' );
+		$order->delete_meta_data( '_kudora_gc_debited' );
+		$order->update_meta_data( '_kudora_gc_state', 'dropped' );
+		if ( $gross > 0 ) {
+			$order->set_total( $gross );
+		}
+		$order->save();
+		$order->add_order_note( __( 'Gift card(s) could not be charged (balance changed). They were removed and the order total now includes the full amount.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
+	}
+
+	/**
+	 * Order-pay page: secure the cards before the customer pays.
+	 *
+	 * @param WC_Order $order  Order.
+	 * @param WP_Error $errors Collected errors.
+	 * @return void
+	 */
+	public function before_payment( $order, $errors ) {
+		if ( is_wp_error( self::secure( $order ) ) ) {
+			$errors->add( 'kudora_gift_card', __( 'The balance of a gift card on this order changed, so the card was removed and the total updated. Please check the total before paying.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
+		}
 	}
 
 	/**
@@ -718,7 +845,7 @@ class Kudora_Gift_Card_Redeem {
 			return;
 		}
 		$round = (int) $order->get_meta( '_kudora_gc_round' );
-		foreach ( self::order_cards( $order ) as $code => $a ) {
+		foreach ( self::debited_cards( $order ) as $code => $a ) {
 			$already = self::refunded_to_card( $order, (int) $a['id'] );
 			$amount  = Kudora_Money::round( $a['amount'] - $already );
 			if ( $amount > 0 ) {
@@ -732,9 +859,9 @@ class Kudora_Gift_Card_Redeem {
 	}
 
 	/**
-	 * An order came back from cancelled/failed: spend the cards again. If a card no
-	 * longer covers its amount and the order is unpaid, drop the cards so the
-	 * customer pays the full total instead.
+	 * An order came back from cancelled/failed to an unpaid status: take the cards
+	 * again, or drop them so the customer pays the full total. (Coming back to a
+	 * paid status is handled by on_paid().)
 	 *
 	 * @param WC_Order $order Order.
 	 * @param string   $from  Old status.
@@ -742,26 +869,32 @@ class Kudora_Gift_Card_Redeem {
 	 * @return void
 	 */
 	public function reinstate_order( $order, $from, $to ) {
+		if ( in_array( $to, wc_get_is_paid_statuses(), true ) ) {
+			return;
+		}
+		self::secure( $order );
+	}
+
+	/**
+	 * Paid while its cards were given back (paid after failing, or off-site after
+	 * the unpaid order was released): take them again. If a card no longer covers
+	 * its amount the payment already happened, so flag the shortfall for the shop.
+	 *
+	 * @param WC_Order $order Order.
+	 * @return void
+	 */
+	public function on_paid( $order ) {
 		$cards = self::order_cards( $order );
-		if ( ! $cards || 'restored' !== $order->get_meta( '_kudora_gc_state' ) ) {
+		if ( ! $cards || 'restored' !== $order->get_meta( '_kudora_gc_state' ) || (float) $order->get_total_refunded() > 0 ) {
 			return;
 		}
-		$res = self::debit_cards( $order, $cards );
-		if ( ! is_wp_error( $res ) ) {
+		if ( ! is_wp_error( self::debit_cards( $order, $cards ) ) ) {
 			return;
 		}
-		if ( in_array( $to, array( 'pending', 'on-hold' ), true ) ) {
-			$gross = (float) $order->get_meta( '_kudora_gc_gross' );
-			$order->delete_meta_data( '_kudora_gift_cards' );
-			$order->update_meta_data( '_kudora_gc_state', 'dropped' );
-			if ( $gross > 0 ) {
-				$order->set_total( $gross );
-			}
-			$order->save();
-			$order->add_order_note( __( 'Gift card(s) could not be charged again (balance changed). They were removed and the order total now includes the full amount.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
-		} else {
-			$order->add_order_note( __( 'Warning: gift card(s) could not be charged again after this order was reinstated. Check the card balances.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
-		}
+		$order->update_meta_data( '_kudora_gc_shortfall', self::order_amount( $order ) );
+		$order->save_meta_data();
+		/* translators: %s: amount */
+		$order->add_order_note( sprintf( __( 'Warning: this order was paid, but its gift card(s) could not be charged again (balance changed): %s was not collected. Check the card balances.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Money::plain( self::order_amount( $order ) ) ) );
 	}
 
 	/**
@@ -801,6 +934,28 @@ class Kudora_Gift_Card_Redeem {
 	 * @return true|WP_Error
 	 */
 	public static function refund_to_card( $order, $card_id, $amount, $note = '' ) {
+		// One refund at a time per order, checked against fresh data (double clicks).
+		$lock = 'order_refund_' . $order->get_id();
+		if ( ! Kudora_DB::lock( $lock, 5 ) ) {
+			return new WP_Error( 'kudora_busy', __( 'Please try again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
+		}
+		try {
+			return self::refund_to_card_locked( wc_get_order( $order->get_id() ), $card_id, $amount, $note );
+		} finally {
+			Kudora_DB::unlock( $lock );
+		}
+	}
+
+	/**
+	 * Refund to card, under the order's refund lock.
+	 *
+	 * @param WC_Order $order   Order.
+	 * @param int      $card_id Card id.
+	 * @param float    $amount  Amount.
+	 * @param string   $note    Note.
+	 * @return true|WP_Error
+	 */
+	protected static function refund_to_card_locked( $order, $card_id, $amount, $note ) {
 		if ( 'debited' !== $order->get_meta( '_kudora_gc_state' ) ) {
 			return new WP_Error( 'kudora_state', __( 'This order has no charged gift card to refund to.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
@@ -982,6 +1137,11 @@ class Kudora_Gift_Card_Redeem {
 		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
 			return $data;
 		}
+		// The coupon field must not be a way around the code-guessing limit: once
+		// the client is over it, codes stop resolving to gift cards here too.
+		if ( self::lookups_blocked() ) {
+			return $data;
+		}
 		$card = Kudora_Gift_Card_Repo::get_by_code( $code );
 		if ( ! $card ) {
 			return $data;
@@ -994,6 +1154,29 @@ class Kudora_Gift_Card_Redeem {
 			'discount_type' => self::HANDOFF_TYPE,
 			'amount'        => 0,
 		);
+	}
+
+	/**
+	 * A code typed into the coupon field matched no coupon and no gift card: count
+	 * it against the code-guessing limit (once per code and request).
+	 *
+	 * @param string         $message Error message.
+	 * @param int            $code    Error code.
+	 * @param WC_Coupon|null $coupon  Coupon.
+	 * @return string
+	 */
+	public function handoff_miss( $message, $code, $coupon = null ) {
+		static $counted = array();
+		if ( WC_Coupon::E_WC_COUPON_NOT_EXIST !== (int) $code || ! $coupon instanceof WC_Coupon || is_admin() && ! wp_doing_ajax() ) {
+			return $message;
+		}
+		$typed = wc_format_coupon_code( $coupon->get_code() );
+		if ( '' === $typed || isset( $counted[ $typed ] ) || Kudora_Virtual_Coupons::is_ours( $typed ) ) {
+			return $message;
+		}
+		$counted[ $typed ] = true;
+		Kudora_Rate_Limit::hit( self::THROTTLE );
+		return $message;
 	}
 
 	/**

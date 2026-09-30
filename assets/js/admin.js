@@ -160,6 +160,15 @@
 	}
 	$( document ).on( 'change', '#discount_type', toggleCouponFields );
 
+	// Internal discount types (automatic rules, gift card hand-off, recorded order
+	// discounts) are not for coupons created by hand; keep one only if a coupon has it.
+	$( '#discount_type option' ).each( function () {
+		var $o = $( this );
+		if ( -1 !== [ 'kudora_rule', 'kudora_gift_card', 'kudora_frozen' ].indexOf( $o.val() ) && ! $o.is( ':selected' ) ) {
+			$o.remove();
+		}
+	} );
+
 	// Product screen: the "Gift card" tab follows the checkbox.
 	function toggleGiftCardTab() {
 		var on = $( '#_kudora_gift_card' ).is( ':checked' );

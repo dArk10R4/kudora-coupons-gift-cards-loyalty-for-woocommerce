@@ -173,7 +173,7 @@ class Kudora_Context {
 				(float) $item->get_subtotal() / $qty,
 				(float) $item->get_subtotal(),
 				(float) $item->get_total(),
-				'' !== (string) $item->get_meta( '_kudora_gc_data' )
+				is_array( $item->get_meta( '_kudora_gc_data' ) )
 			);
 		}
 		$ctx->user_id          = (int) $order->get_customer_id();
@@ -250,35 +250,16 @@ class Kudora_Context {
 	}
 
 	/**
-	 * Paid-order ids of this customer (user id, or billing email for guests),
-	 * excluding the context's own order. Memoised.
+	 * Purchase history of this customer (user id, or billing email for guests),
+	 * leaving out the context's own order. Memoised.
 	 *
-	 * @return int[]
+	 * @return array{count:int,spent:float,products:int[],categories:int[]}
 	 */
-	public function previous_paid_order_ids() {
-		if ( isset( $this->memo['paid_ids'] ) ) {
-			return $this->memo['paid_ids'];
+	public function history() {
+		if ( ! isset( $this->memo['history'] ) ) {
+			$this->memo['history'] = Kudora_Customer_History::get( $this->user_id, $this->email, $this->order );
 		}
-		$ids = array();
-		if ( $this->user_id || $this->email ) {
-			$args = array(
-				'status' => wc_get_is_paid_statuses(),
-				'limit'  => 500,
-				'return' => 'ids',
-				'type'   => 'shop_order',
-			);
-			if ( $this->user_id ) {
-				$args['customer_id'] = $this->user_id;
-			} else {
-				$args['billing_email'] = $this->email;
-			}
-			$ids = array_map( 'intval', wc_get_orders( $args ) );
-			if ( $this->order ) {
-				$ids = array_values( array_diff( $ids, array( (int) $this->order->get_id() ) ) );
-			}
-		}
-		$this->memo['paid_ids'] = $ids;
-		return $ids;
+		return $this->memo['history'];
 	}
 
 	/**
@@ -287,27 +268,16 @@ class Kudora_Context {
 	 * @return int
 	 */
 	public function order_count() {
-		return count( $this->previous_paid_order_ids() );
+		return $this->history()['count'];
 	}
 
 	/**
-	 * Money spent on previous paid orders.
+	 * Money spent on previous paid orders (net of refunds).
 	 *
 	 * @return float
 	 */
 	public function total_spent() {
-		if ( isset( $this->memo['spent'] ) ) {
-			return $this->memo['spent'];
-		}
-		$sum = 0.0;
-		foreach ( $this->previous_paid_order_ids() as $id ) {
-			$o = wc_get_order( $id );
-			if ( $o ) {
-				$sum += (float) $o->get_total() - (float) $o->get_total_refunded();
-			}
-		}
-		$this->memo['spent'] = $sum;
-		return $sum;
+		return $this->history()['spent'];
 	}
 
 	/**
@@ -316,33 +286,10 @@ class Kudora_Context {
 	 * @return array{products:int[],categories:int[]}
 	 */
 	public function purchased() {
-		if ( isset( $this->memo['purchased'] ) ) {
-			return $this->memo['purchased'];
-		}
-		$products = array();
-		$cats     = array();
-		foreach ( $this->previous_paid_order_ids() as $id ) {
-			$o = wc_get_order( $id );
-			if ( ! $o ) {
-				continue;
-			}
-			foreach ( $o->get_items() as $item ) {
-				if ( $item instanceof WC_Order_Item_Product ) {
-					$products[] = (int) $item->get_product_id();
-					if ( $item->get_variation_id() ) {
-						$products[] = (int) $item->get_variation_id();
-					}
-				}
-			}
-		}
-		$products = array_values( array_unique( $products ) );
-		foreach ( $products as $pid ) {
-			$cats = array_merge( $cats, array_map( 'intval', wc_get_product_cat_ids( $pid ) ) );
-		}
-		$this->memo['purchased'] = array(
-			'products'   => $products,
-			'categories' => array_values( array_unique( $cats ) ),
+		$h = $this->history();
+		return array(
+			'products'   => $h['products'],
+			'categories' => $h['categories'],
 		);
-		return $this->memo['purchased'];
 	}
 }

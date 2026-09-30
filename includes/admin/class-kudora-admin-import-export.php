@@ -106,7 +106,7 @@ class Kudora_Admin_Import_Export {
 	 * @return void
 	 */
 	protected static function render_screen( $type, $columns, array $modes ) {
-		$preview = get_transient( 'kudora_import_preview_' . get_current_user_id() );
+		$preview = Kudora_Importer::get_preview( get_current_user_id() );
 		$jobs    = self::jobs_for_user();
 		?>
 		<div class="kudora-columns">
@@ -213,24 +213,25 @@ class Kudora_Admin_Import_Export {
 		check_admin_referer( 'kudora_import_upload' );
 		$type = isset( $_POST['type'] ) && isset( Kudora_Importer::types()[ sanitize_key( $_POST['type'] ) ] ) ? sanitize_key( $_POST['type'] ) : 'gift_cards';
 		$mode = isset( $_POST['mode'] ) ? sanitize_key( wp_unslash( $_POST['mode'] ) ) : 'create';
-		if ( empty( $_FILES['csv'] ) || ! isset( $_FILES['csv']['tmp_name'] ) ) {
+		// phpcs:disable WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.ValidatedSanitizedInput.MissingUnslash -- tmp_name is PHP's own path, checked with is_uploaded_file().
+		$tmp  = isset( $_FILES['csv']['tmp_name'] ) ? (string) $_FILES['csv']['tmp_name'] : '';
+		$name = isset( $_FILES['csv']['name'] ) ? sanitize_file_name( wp_unslash( $_FILES['csv']['name'] ) ) : '';
+		// phpcs:enable
+		if ( '' === $tmp || ! is_uploaded_file( $tmp ) ) {
 			Kudora_Admin::flash( __( 'Choose a CSV file.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'error' );
 			wp_safe_redirect( self::back_url( $type ) );
 			exit;
 		}
-		require_once ABSPATH . 'wp-admin/includes/file.php';
-		add_filter( 'upload_dir', array( __CLASS__, 'private_dir' ) );
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- file array handled by wp_handle_upload().
-		$file = wp_handle_upload( $_FILES['csv'], array( 'test_form' => false, 'mimes' => array( 'csv' => 'text/csv', 'txt' => 'text/plain' ) ) );
-		remove_filter( 'upload_dir', array( __CLASS__, 'private_dir' ) );
-		if ( isset( $file['error'] ) ) {
-			Kudora_Admin::flash( esc_html( $file['error'] ), 'error' );
+		$check = wp_check_filetype( $name, array( 'csv' => 'text/csv', 'txt' => 'text/plain' ) );
+		if ( ! $check['ext'] ) {
+			Kudora_Admin::flash( __( 'Upload a .csv file.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'error' );
 			wp_safe_redirect( self::back_url( $type ) );
 			exit;
 		}
-		$data = Kudora_CSV::read( $file['file'] );
+		// Parsed straight from PHP's temporary upload, which PHP deletes when the request
+		// ends: the file (codes, balances, emails) never lands in a web-readable folder.
+		$data = Kudora_CSV::read( $tmp );
 		if ( is_wp_error( $data ) ) {
-			wp_delete_file( $file['file'] );
 			Kudora_Admin::flash( esc_html( $data->get_error_message() ), 'error' );
 			wp_safe_redirect( self::back_url( $type ) );
 			exit;
@@ -239,46 +240,18 @@ class Kudora_Admin_Import_Export {
 			'mode'     => $mode,
 			'lifetime' => ! empty( $_POST['lifetime'] ),
 		);
-		$old  = get_transient( 'kudora_import_preview_' . get_current_user_id() );
-		if ( is_array( $old ) && ! empty( $old['path'] ) && $old['path'] !== $file['file'] ) {
-			wp_delete_file( $old['path'] );
-		}
-		set_transient(
-			'kudora_import_preview_' . get_current_user_id(),
+		Kudora_Importer::save_preview(
+			get_current_user_id(),
 			array(
 				'type'   => $type,
-				'path'   => $file['file'],
 				'opts'   => $opts,
+				'rows'   => $data['rows'],
 				'total'  => count( $data['rows'] ),
 				'result' => Kudora_Importer::run( $type, $data['rows'], $opts, true ),
-			),
-			HOUR_IN_SECONDS
+			)
 		);
 		wp_safe_redirect( self::back_url( $type ) );
 		exit;
-	}
-
-	/**
-	 * Uploads go to a private, non-listable folder.
-	 *
-	 * @param array $dirs Upload dirs.
-	 * @return array
-	 */
-	public static function private_dir( $dirs ) {
-		$dirs['subdir'] = '/kudora-imports';
-		$dirs['path']   = $dirs['basedir'] . '/kudora-imports';
-		$dirs['url']    = $dirs['baseurl'] . '/kudora-imports';
-		if ( wp_mkdir_p( $dirs['path'] ) && ! file_exists( $dirs['path'] . '/index.php' ) ) {
-			global $wp_filesystem;
-			if ( ! $wp_filesystem ) {
-				WP_Filesystem();
-			}
-			if ( $wp_filesystem ) {
-				$wp_filesystem->put_contents( $dirs['path'] . '/index.php', "<?php\n// Silence is golden.\n", FS_CHMOD_FILE );
-				$wp_filesystem->put_contents( $dirs['path'] . '/.htaccess', "Deny from all\n", FS_CHMOD_FILE );
-			}
-		}
-		return $dirs;
 	}
 
 	/**
@@ -289,34 +262,28 @@ class Kudora_Admin_Import_Export {
 	public static function handle_run() {
 		self::guard_caps();
 		check_admin_referer( 'kudora_import_run' );
-		$preview = get_transient( 'kudora_import_preview_' . get_current_user_id() );
-		if ( ! is_array( $preview ) || empty( $preview['path'] ) ) {
+		$preview = Kudora_Importer::get_preview( get_current_user_id() );
+		if ( ! $preview || ! isset( $preview['rows'] ) ) {
 			Kudora_Admin::flash( __( 'The preview expired. Upload the file again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'error' );
 			wp_safe_redirect( admin_url( 'admin.php?page=kudora-gift-cards&tab=import' ) );
 			exit;
 		}
-		delete_transient( 'kudora_import_preview_' . get_current_user_id() );
+		Kudora_Importer::clear_preview( get_current_user_id() );
 		$type = $preview['type'];
 		if ( $preview['total'] > self::INLINE_LIMIT ) {
-			$job                   = Kudora_Importer::queue( $preview['path'], $type, $preview['opts'], $preview['total'] );
-			$jobs                  = (array) get_user_meta( get_current_user_id(), '_kudora_import_jobs', true );
-			$jobs[]                = $job;
+			$job    = Kudora_Importer::queue( $preview['rows'], $type, $preview['opts'] );
+			$jobs   = (array) get_user_meta( get_current_user_id(), '_kudora_import_jobs', true );
+			$jobs[] = $job;
 			update_user_meta( get_current_user_id(), '_kudora_import_jobs', array_slice( array_filter( $jobs ), -5 ) );
 			Kudora_Admin::flash( __( 'The import is running in the background. Reload this page to see its progress.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		} else {
-			$data = Kudora_CSV::read( $preview['path'] );
-			wp_delete_file( $preview['path'] );
-			if ( is_wp_error( $data ) ) {
-				Kudora_Admin::flash( esc_html( $data->get_error_message() ), 'error' );
-			} else {
-				$res = Kudora_Importer::run( $type, $data['rows'], $preview['opts'], false );
-				/* translators: 1: new, 2: updated, 3: skipped */
-				$msg = sprintf( __( 'Import finished: %1$d new, %2$d updated, %3$d skipped.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), $res['created'], $res['updated'], $res['skipped'] );
-				if ( $res['errors'] ) {
-					$msg .= '<br />' . implode( '<br />', array_map( 'esc_html', array_slice( $res['errors'], 0, 20 ) ) );
-				}
-				Kudora_Admin::flash( $msg, $res['errors'] ? 'error' : 'success' );
+			$res = Kudora_Importer::run( $type, $preview['rows'], $preview['opts'], false );
+			/* translators: 1: new, 2: updated, 3: skipped */
+			$msg = sprintf( __( 'Import finished: %1$d new, %2$d updated, %3$d skipped.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), $res['created'], $res['updated'], $res['skipped'] );
+			if ( $res['errors'] ) {
+				$msg .= '<br />' . implode( '<br />', array_map( 'esc_html', array_slice( $res['errors'], 0, 20 ) ) );
 			}
+			Kudora_Admin::flash( $msg, $res['errors'] ? 'error' : 'success' );
 		}
 		wp_safe_redirect( self::back_url( $type ) );
 		exit;

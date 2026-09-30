@@ -103,6 +103,10 @@ Money paid with a gift card goes back to the card when an order is cancelled or 
 
 Not unless you ask for it: data is kept on uninstall unless "Delete data on uninstall" is switched on in the settings.
 
+= How are gift card codes protected from guessing? =
+
+Codes are long and random by default, and every place a code can be entered (the gift card field, the coupon field, the balance check and "Save to account") shares one limit on failed attempts per visitor. Visitors are told apart by their IP address as the server sees it. If your site sits behind a proxy or CDN you trust, return the visitor's real address with the `kudora_client_ip` filter, or all visitors share one limit.
+
 == Screenshots ==
 
 1. Gift card product page with amount, recipient, message, delivery date and design preview.

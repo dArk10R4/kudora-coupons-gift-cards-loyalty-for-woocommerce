@@ -50,13 +50,13 @@ class Kudora_Gift_Card_Issuer {
 		if ( ! $lines ) {
 			return array();
 		}
-		$this->reenable_voided( $order );
 		$lock = 'issue_' . $order->get_id();
 		if ( ! Kudora_DB::lock( $lock ) ) {
 			return array();
 		}
 		$new = array();
 		try {
+			$this->reenable_voided( $order );
 			foreach ( $lines as $item_id => $item ) {
 				$new = array_merge( $new, $this->issue_for_line( $order, $item ) );
 			}
@@ -87,7 +87,7 @@ class Kudora_Gift_Card_Issuer {
 	 */
 	protected function issue_for_line( $order, $item ) {
 		$gc      = (array) $item->get_meta( '_kudora_gc_data' );
-		$ids     = array_filter( array_map( 'intval', (array) $item->get_meta( '_kudora_gc_ids' ) ) );
+		$ids     = array();
 		$qty     = max( 0, (int) $item->get_quantity() - abs( (int) $order->get_qty_refunded_for_item( $item->get_id() ) ) );
 		$product = $item->get_product();
 		$parent  = $product && $product->get_parent_id() ? wc_get_product( $product->get_parent_id() ) : $product;
@@ -100,7 +100,15 @@ class Kudora_Gift_Card_Issuer {
 			$amount = Kudora_Money::round( (float) $item->get_subtotal() / max( 1, (int) $item->get_quantity() ) );
 		}
 		$new = array();
-		for ( $unit = count( $ids ); $unit < $qty; $unit++ ) {
+		for ( $unit = 0; $unit < $qty; $unit++ ) {
+			// The issue ledger key, not the line meta (which a parallel "paid" event may
+			// not see yet), says whether this unit already has its card.
+			$key    = sprintf( 'issue:item:%d:%d', $item->get_id(), $unit );
+			$issued = Kudora_Gift_Card_Repo::card_for_key( $key );
+			if ( $issued ) {
+				$ids[] = $issued;
+				continue;
+			}
 			$deliver_at = null;
 			if ( ! empty( $gc['deliver_date'] ) && $gc['deliver_date'] > wp_date( 'Y-m-d' ) ) {
 				$local      = new DateTimeImmutable( $gc['deliver_date'] . ' 08:00:00', wp_timezone() );
@@ -130,15 +138,22 @@ class Kudora_Gift_Card_Issuer {
 						/* translators: %s: order number */
 						'ledger_note'     => sprintf( __( 'Bought in order #%s', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), $order->get_order_number() ),
 					),
-					sprintf( 'issue:item:%d:%d', $item->get_id(), $unit )
+					$key
 				);
 			} catch ( RuntimeException $e ) {
 				$order->add_order_note( 'Kudora: ' . esc_html( $e->getMessage() ) );
 				break;
 			}
+			if ( ! $id ) {
+				break;
+			}
 			$ids[] = $id;
 			$new[] = $id;
-			$item->update_meta_data( '_kudora_gc_ids', array_values( $ids ) );
+		}
+		$known = array_filter( array_map( 'intval', (array) $item->get_meta( '_kudora_gc_ids' ) ) );
+		$ids   = array_values( array_unique( array_merge( $known, $ids ) ) );
+		if ( $ids !== $known ) {
+			$item->update_meta_data( '_kudora_gc_ids', $ids );
 			$item->save_meta_data();
 		}
 		return $new;

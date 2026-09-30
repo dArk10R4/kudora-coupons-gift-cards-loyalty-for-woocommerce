@@ -327,6 +327,15 @@ class Kudora_Admin_Loyalty {
 				<?php if ( ! $res['rows'] ) : ?>
 					<tr><td colspan="6"><?php esc_html_e( 'Nothing logged for these filters.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></td></tr>
 				<?php endif; ?>
+				<?php
+				$kudora_orders = array();
+				foreach ( $res['rows'] as $row ) {
+					if ( 'order' === $row['entity_type'] ) {
+						$kudora_orders[] = $row['entity_id'];
+					}
+				}
+				Kudora_Admin::prime( $kudora_orders, wp_list_pluck( $res['rows'], 'user_id' ) );
+				?>
 				<?php foreach ( $res['rows'] as $row ) : ?>
 					<?php $u = get_userdata( (int) $row['user_id'] ); ?>
 					<tr>
@@ -625,6 +634,7 @@ class Kudora_Admin_Loyalty {
 				<?php if ( ! $rows ) : ?>
 					<tr><td colspan="6"><?php esc_html_e( 'No referrals yet.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></td></tr>
 				<?php endif; ?>
+				<?php Kudora_Admin::prime( wp_list_pluck( (array) $rows, 'order_id' ), array_merge( wp_list_pluck( (array) $rows, 'referrer_id' ), wp_list_pluck( (array) $rows, 'referred_user_id' ) ) ); ?>
 				<?php foreach ( (array) $rows as $row ) : ?>
 					<?php
 					$ref = get_userdata( (int) $row['referrer_id'] );

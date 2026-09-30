@@ -23,6 +23,13 @@ class Kudora_Rules_Repo {
 	protected static $active = array();
 
 	/**
+	 * Per-request cache of rules by id (null = not found).
+	 *
+	 * @var array<int,array|null>
+	 */
+	protected static $by_id = array();
+
+	/**
 	 * Table name.
 	 *
 	 * @return string
@@ -95,9 +102,22 @@ class Kudora_Rules_Repo {
 	 */
 	public static function get( $id ) {
 		global $wpdb;
+		$id = (int) $id;
+		if ( array_key_exists( $id, self::$by_id ) ) {
+			return self::$by_id[ $id ];
+		}
+		foreach ( self::$active as $rules ) {
+			foreach ( $rules as $rule ) {
+				if ( $rule['id'] === $id ) {
+					self::$by_id[ $id ] = $rule;
+					return $rule;
+				}
+			}
+		}
 		$table = self::table();
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		return self::hydrate( $wpdb->get_row( $wpdb->prepare( "SELECT * FROM %i WHERE id = %d", $table, $id ), ARRAY_A ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, cached per request.
+		self::$by_id[ $id ] = self::hydrate( $wpdb->get_row( $wpdb->prepare( "SELECT * FROM %i WHERE id = %d", $table, $id ), ARRAY_A ) );
+		return self::$by_id[ $id ];
 	}
 
 	/**
@@ -122,8 +142,8 @@ class Kudora_Rules_Repo {
 			'usage_limit' => isset( $data['usage_limit'] ) && '' !== $data['usage_limit'] && null !== $data['usage_limit'] ? max( 0, (int) $data['usage_limit'] ) : null,
 			'updated_at'  => Kudora_DB::now(),
 		);
-		self::$active = array();
-		$table        = self::table();
+		self::flush();
+		$table = self::table();
 		if ( ! empty( $data['id'] ) ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table.
 			$wpdb->update( $table, $row, array( 'id' => (int) $data['id'] ) );
@@ -143,7 +163,7 @@ class Kudora_Rules_Repo {
 	 */
 	public static function delete( $id ) {
 		global $wpdb;
-		self::$active = array();
+		self::flush();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table.
 		$wpdb->delete( self::table(), array( 'id' => (int) $id ) );
 	}
@@ -157,7 +177,7 @@ class Kudora_Rules_Repo {
 	 */
 	public static function set_status( $id, $status ) {
 		global $wpdb;
-		self::$active = array();
+		self::flush();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table.
 		$wpdb->update( self::table(), array( 'status' => $status ? 1 : 0 ), array( 'id' => (int) $id ) );
 	}
@@ -174,7 +194,7 @@ class Kudora_Rules_Repo {
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
 		$wpdb->query( $wpdb->prepare( "UPDATE %i SET usage_count = GREATEST(0, CAST(usage_count AS SIGNED) + %d) WHERE id = %d", $table, (int) $delta, $id ) );
-		self::$active = array();
+		self::flush();
 	}
 
 	/**
@@ -184,5 +204,6 @@ class Kudora_Rules_Repo {
 	 */
 	public static function flush() {
 		self::$active = array();
+		self::$by_id  = array();
 	}
 }

@@ -48,6 +48,15 @@ foreach ( $order->get_items() as $kudora_item ) {
 		<?php if ( 'restored' === $kudora_state ) : ?>
 			<p class="description"><?php esc_html_e( 'The gift card money was returned to the cards.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></p>
 		<?php endif; ?>
+		<?php $kudora_excess = (float) $order->get_meta( '_kudora_gc_excess' ) - array_sum( array_map( 'floatval', (array) $order->get_meta( '_kudora_gc_refunded' ) ) ); ?>
+		<?php if ( 'debited' === $kudora_state && $kudora_excess > 0.001 ) : ?>
+			<?php /* translators: %s: amount */ ?>
+			<p class="kudora-warning"><?php echo wp_kses_post( sprintf( __( 'After this order was edited, the gift cards paid %s more than its total. Refund that to the card(s).', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), wc_price( $kudora_excess, array( 'currency' => $order->get_currency() ) ) ) ); ?></p>
+		<?php endif; ?>
+		<?php if ( (float) $order->get_meta( '_kudora_gc_shortfall' ) > 0 ) : ?>
+			<?php /* translators: %s: amount */ ?>
+			<p class="kudora-warning"><?php echo wp_kses_post( sprintf( __( 'Paid after its gift card money was released, and the card(s) could not be charged again: %s was not collected.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), wc_price( (float) $order->get_meta( '_kudora_gc_shortfall' ), array( 'currency' => $order->get_currency() ) ) ) ); ?></p>
+		<?php endif; ?>
 	<?php endif; ?>
 
 	<?php if ( $kudora_issued ) : ?>
@@ -68,6 +77,10 @@ foreach ( $order->get_items() as $kudora_item ) {
 			<?php if ( $kudora_redeem['points'] ) : ?>
 				<?php /* translators: 1: points, 2: amount */ ?>
 				<li><?php echo wp_kses_post( sprintf( __( 'Used %1$s for %2$s', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), esc_html( Kudora_Loyalty_Redeem::format_points( $kudora_redeem['points'] ) ), wc_price( $kudora_redeem['amount'] ) ) ); ?></li>
+				<?php if ( (int) $order->get_meta( '_kudora_points_shortfall' ) > 0 ) : ?>
+					<?php /* translators: %s: points */ ?>
+					<li class="kudora-warning"><?php echo esc_html( sprintf( __( 'Paid after its points were released; %s could not be deducted again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Loyalty_Redeem::format_points( (int) $order->get_meta( '_kudora_points_shortfall' ) ) ) ); ?></li>
+				<?php endif; ?>
 			<?php endif; ?>
 			<?php if ( $kudora_earned ) : ?>
 				<?php /* translators: %s: points */ ?>
@@ -81,12 +94,12 @@ foreach ( $order->get_items() as $kudora_item ) {
 		</ul>
 	<?php endif; ?>
 
-	<?php if ( Kudora_Settings::module( 'gift_cards' ) && $order->is_paid() ) : ?>
+	<?php if ( Kudora_Settings::module( 'gift_cards' ) && $order->is_paid() && (float) $order->get_remaining_refund_amount() > 0 ) : ?>
 		<h4><?php esc_html_e( 'Refund as store credit', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></h4>
-		<p class="description"><?php esc_html_e( 'Creates a gift card for the customer and emails it. Use it instead of a money refund.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></p>
+		<p class="description"><?php esc_html_e( 'Records a refund (no money is sent back) and emails the customer a gift card for it.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></p>
 		<span class="kudora-inline-form">
 			<label class="screen-reader-text" for="kudora-store-credit"><?php esc_html_e( 'Store credit amount', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></label>
-			<input type="text" class="wc_input_price short" id="kudora-store-credit" />
+			<input type="text" class="wc_input_price short" id="kudora-store-credit" placeholder="<?php echo esc_attr( wc_format_localized_price( $order->get_remaining_refund_amount() ) ); ?>" />
 			<button type="button" class="button kudora-order-do" data-do="store_credit"><?php esc_html_e( 'Issue credit', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></button>
 		</span>
 	<?php endif; ?>

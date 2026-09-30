@@ -79,13 +79,18 @@ class Kudora_Privacy {
 	 */
 	public function export( $email, $page = 1 ) {
 		$data = array();
+		$user = get_user_by( 'email', $email );
+		$uid  = $user ? (int) $user->ID : -1;
 		foreach ( $this->cards_for( $email ) as $c ) {
+			// Export requests are confirmed from the mailbox, so cards sent to it are the
+			// requester's; a card they bought for someone else is exported masked.
+			$mine   = strtolower( $email ) === strtolower( (string) $c['recipient_email'] ) || $uid === (int) $c['owner_id'] || Kudora_Gift_Card_Frontend::is_buyers_own( $c );
 			$data[] = array(
 				'group_id'    => 'kudora-gift-cards',
 				'group_label' => __( 'Gift cards', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ),
 				'item_id'     => 'kudora-gc-' . $c['id'],
 				'data'        => array(
-					array( 'name' => __( 'Code', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'value' => $c['code'] ),
+					array( 'name' => __( 'Code', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'value' => $mine ? $c['code'] : Kudora_Gift_Card_Repo::mask( $c['code'] ) ),
 					array( 'name' => __( 'Balance', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'value' => Kudora_Money::plain( $c['balance'] ) ),
 					array( 'name' => __( 'Recipient', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'value' => trim( $c['recipient_name'] . ' ' . $c['recipient_email'] ) ),
 					array( 'name' => __( 'From', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'value' => $c['sender_name'] ),
@@ -93,7 +98,6 @@ class Kudora_Privacy {
 				),
 			);
 		}
-		$user = get_user_by( 'email', $email );
 		if ( $user ) {
 			$row    = Kudora_Points_Repo::row( $user->ID );
 			$data[] = array(

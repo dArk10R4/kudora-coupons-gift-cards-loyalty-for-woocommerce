@@ -107,7 +107,8 @@ class Kudora_Install {
 		}
 
 		// Rewrite endpoints for My Account tabs are added on init; flush once on the next request.
-		update_option( 'kudora_flush_rewrite', 1 );
+		update_option( 'kudora_flush_rewrite', 1, true );
+		Kudora_Scheduler::ensure_daily_action();
 	}
 
 	/**
@@ -228,6 +229,7 @@ CREATE TABLE {$p}kudora_points_ledger (
   expires_at datetime NULL DEFAULT NULL,
   warned tinyint(1) NOT NULL DEFAULT 0,
   idempotency_key varchar(120) NULL DEFAULT NULL,
+  lots text NULL,
   created_at datetime NULL DEFAULT NULL,
   PRIMARY KEY  (id),
   UNIQUE KEY idempotency_key (idempotency_key),
@@ -315,9 +317,33 @@ CREATE TABLE {$p}kudora_referrals (
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- uninstall drops our own tables.
 			$wpdb->query( $wpdb->prepare( "DROP TABLE IF EXISTS %i", $wpdb->prefix . $table ) );
 		}
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall removes our own options.
-		$wpdb->query( $wpdb->prepare( "DELETE FROM %i WHERE option_name LIKE %s", $wpdb->options, $wpdb->esc_like( 'kudora_' ) . '%' ) );
+		// Our options, our email settings, and cached history / counters (transients).
+		foreach ( array( 'kudora_', 'woocommerce_kudora_', '_transient_kudora_', '_transient_timeout_kudora_' ) as $prefix ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall removes our own options.
+			$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE option_name LIKE %s', $wpdb->options, $wpdb->esc_like( $prefix ) . '%' ) );
+		}
+		// Our meta on products, coupons and orders (both order storages).
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall removes our own post meta.
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE meta_key LIKE %s', $wpdb->postmeta, $wpdb->esc_like( '_kudora_' ) . '%' ) );
+		$hpos_meta = $wpdb->prefix . 'wc_orders_meta';
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- checking for WooCommerce's order meta table.
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $hpos_meta ) ) ) === $hpos_meta ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall removes our own order meta.
+			$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE meta_key LIKE %s', $hpos_meta, $wpdb->esc_like( '_kudora_' ) . '%' ) );
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall removes our own order item meta.
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE meta_key LIKE %s', $wpdb->prefix . 'woocommerce_order_itemmeta', $wpdb->esc_like( '_kudora_' ) . '%' ) );
+	}
+
+	/**
+	 * Remove our user meta (shared by every site of a network: only once all
+	 * sites are uninstalled with "delete data").
+	 *
+	 * @return void
+	 */
+	public static function drop_user_meta() {
+		global $wpdb;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall removes our own user meta.
-		$wpdb->query( $wpdb->prepare( "DELETE FROM %i WHERE meta_key LIKE %s", $wpdb->usermeta, $wpdb->esc_like( '_kudora_' ) . '%' ) );
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE meta_key LIKE %s', $wpdb->usermeta, $wpdb->esc_like( '_kudora_' ) . '%' ) );
 	}
 }

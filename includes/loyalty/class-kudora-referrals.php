@@ -116,16 +116,12 @@ class Kudora_Referrals {
 	 * @return bool
 	 */
 	public static function is_new_customer( $user_id, $email, $exclude = 0 ) {
-		$ctx          = new Kudora_Context();
-		$ctx->user_id = (int) $user_id;
-		$ctx->email   = strtolower( (string) $email );
-		$ids          = $ctx->previous_paid_order_ids();
-		if ( $user_id && $email ) {
-			$ctx2          = new Kudora_Context();
-			$ctx2->email   = strtolower( (string) $email );
-			$ids           = array_merge( $ids, $ctx2->previous_paid_order_ids() );
+		$order = $exclude ? wc_get_order( $exclude ) : null;
+		$order = $order instanceof WC_Order ? $order : null;
+		if ( $user_id && Kudora_Customer_History::get( (int) $user_id, '', $order )['count'] > 0 ) {
+			return false;
 		}
-		return ! array_diff( array_unique( $ids ), array( (int) $exclude ) );
+		return ! ( $email && Kudora_Customer_History::get( 0, (string) $email, $order )['count'] > 0 );
 	}
 
 	/**
@@ -361,6 +357,28 @@ class Kudora_Referrals {
 		if ( 'completed' === $want && 'completed' !== $order->get_status() ) {
 			return;
 		}
+		// One decision at a time per referrer: two "paid" events for the same order
+		// (gateway webhook + return page) or two referred orders racing the monthly
+		// cap must not both reward.
+		$lock = 'referral_' . $referrer;
+		if ( ! Kudora_DB::lock( $lock, 10 ) ) {
+			return;
+		}
+		try {
+			$this->decide( $order, $referrer );
+		} finally {
+			Kudora_DB::unlock( $lock );
+		}
+	}
+
+	/**
+	 * Reward or reject a referred order (under the referrer's lock).
+	 *
+	 * @param WC_Order $order    Order.
+	 * @param int      $referrer Referrer.
+	 * @return void
+	 */
+	protected function decide( $order, $referrer ) {
 		$row = self::row_for_order( $order->get_id() );
 		if ( $row && in_array( $row['status'], array( 'rewarded', 'rejected', 'reversed' ), true ) ) {
 			return;

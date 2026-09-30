@@ -47,18 +47,14 @@ class Kudora_Discount_Engine {
 	const CART_TYPES = array( 'cart_discount', 'bxgy', 'bundle' );
 
 	/**
-	 * Base (pre-rule) unit price per product object in this request.
+	 * Cart line product objects of this request (catalog prices skip them), each
+	 * with the price this engine set on it and the price it replaced:
+	 * {base:float|null, set:float|null}. Held by object, not by spl_object_id(),
+	 * so a freed object's id can never pass its prices to a new one.
 	 *
-	 * @var array<int,float>
+	 * @var SplObjectStorage|null
 	 */
-	protected static $base = array();
-
-	/**
-	 * Product objects that are cart lines in this request (catalog prices skip them).
-	 *
-	 * @var array<int,bool>
-	 */
-	protected static $in_cart = array();
+	protected static $lines = null;
 
 	/**
 	 * Items + WC_Discounts captured for our coupon types (code => array).
@@ -103,15 +99,24 @@ class Kudora_Discount_Engine {
 		add_filter( 'woocommerce_coupon_custom_discounts_array', array( $this, 'custom_discounts' ), 20, 2 );
 
 		add_action( 'woocommerce_before_calculate_totals', array( $this, 'apply_price_rules' ), 20 );
+		// Also as soon as the cart is loaded, so the mini-cart and cart fragments of a
+		// page that never recalculates show the rule prices too.
+		add_action( 'woocommerce_cart_loaded_from_session', array( $this, 'apply_price_rules' ), 20 );
 		add_action( 'woocommerce_before_calculate_totals', array( $this, 'sync_rule_coupons' ), 25 );
+		// Before WooCommerce's own coupon check on page load, so a rule that just
+		// ended is dropped quietly instead of as "coupon kudora-rule-N is invalid".
+		add_action( 'woocommerce_check_cart_items', array( $this, 'sync_before_check' ), 0 );
 		add_filter( 'woocommerce_cart_item_price', array( $this, 'cart_item_price_html' ), 20, 3 );
 
 		add_filter( 'woocommerce_package_rates', array( $this, 'free_shipping' ), 50, 2 );
 		add_filter( 'woocommerce_cart_shipping_packages', array( $this, 'package_signature' ) );
 
 		add_action( 'woocommerce_add_to_cart', array( $this, 'maybe_auto_add' ), 30 );
+		add_action( 'woocommerce_cart_item_removed', array( $this, 'remember_gift_removal' ), 20, 2 );
 		add_action( 'woocommerce_cart_item_removed', array( $this, 'maybe_auto_add' ), 30 );
 		add_action( 'woocommerce_after_cart_item_quantity_update', array( $this, 'maybe_auto_add' ), 30 );
+		// Every calculation re-checks the gifts (address changes, rules ending, ...).
+		add_action( 'woocommerce_before_calculate_totals', array( $this, 'maybe_auto_add' ), 15, 0 );
 
 		add_action( 'woocommerce_checkout_create_order_line_item', array( $this, 'line_item_rules' ), 10, 3 );
 		add_action( 'kudora_order_placed', array( $this, 'record_rules' ), 5 );
@@ -146,29 +151,60 @@ class Kudora_Discount_Engine {
 	}
 
 	/**
+	 * Tracked cart line objects.
+	 *
+	 * @return SplObjectStorage
+	 */
+	protected static function lines() {
+		if ( null === self::$lines ) {
+			self::$lines = new SplObjectStorage();
+		}
+		return self::$lines;
+	}
+
+	/**
+	 * Mark a product object as a cart line (its price is managed here).
+	 *
+	 * @param WC_Product $product Product.
+	 * @return void
+	 */
+	public static function mark_cart_object( $product ) {
+		$lines = self::lines();
+		if ( ! isset( $lines[ $product ] ) ) {
+			$lines[ $product ] = array(
+				'base' => null,
+				'set'  => null,
+			);
+		}
+	}
+
+	/**
 	 * Whether a product object is a cart line (its price is managed here).
 	 *
 	 * @param WC_Product $product Product.
 	 * @return bool
 	 */
 	public static function is_cart_object( $product ) {
-		return isset( self::$in_cart[ spl_object_id( $product ) ] );
+		return isset( self::lines()[ $product ] );
 	}
 
 	/**
-	 * Base unit price of a cart line (first price seen in this request).
+	 * Unit price of a cart line before this engine's rules: the price it carries
+	 * now (the product's own price, or whatever another plugin or the gift card
+	 * amount set), unless that is the price this engine set, then the one it replaced.
 	 *
 	 * @param array $item Cart item.
 	 * @return float
 	 */
 	public static function base_price( array $item ) {
 		$product = $item['data'];
-		$id      = spl_object_id( $product );
-		self::$in_cart[ $id ] = true;
-		if ( ! isset( self::$base[ $id ] ) ) {
-			self::$base[ $id ] = (float) $product->get_price( 'edit' );
+		self::mark_cart_object( $product );
+		$mark    = self::lines()[ $product ];
+		$current = (float) $product->get_price( 'edit' );
+		if ( null !== $mark['set'] && abs( $current - $mark['set'] ) < 0.000001 ) {
+			return (float) $mark['base'];
 		}
-		return self::$base[ $id ];
+		return $current;
 	}
 
 	/**
@@ -245,10 +281,10 @@ class Kudora_Discount_Engine {
 			if ( empty( $item['data'] ) ) {
 				continue;
 			}
-			self::$in_cart[ spl_object_id( $item['data'] ) ] = true;
 			$price[ $key ] = self::base_price( $item );
 			$hits[ $key ]  = array();
 		}
+		$base = $price;
 		if ( $rules ) {
 			$ctx = Kudora_Context::from_cart(
 				$cart,
@@ -295,15 +331,28 @@ class Kudora_Discount_Engine {
 			}
 		}
 
+		$lines = self::lines();
 		foreach ( $cart->get_cart() as $key => $item ) {
 			if ( ! isset( $price[ $key ] ) ) {
 				continue;
 			}
+			$product = $item['data'];
 			if ( $hits[ $key ] ) {
-				$item['data']->set_price( $price[ $key ] );
-			} elseif ( abs( (float) $item['data']->get_price( 'edit' ) - self::base_price( $item ) ) > 0.00001 && empty( $item['kudora_gc'] ) ) {
-				// A rule stopped applying: back to the base price.
-				$item['data']->set_price( self::base_price( $item ) );
+				$product->set_price( $price[ $key ] );
+				$lines[ $product ] = array(
+					'base' => $base[ $key ],
+					'set'  => (float) $product->get_price( 'edit' ),
+				);
+			} else {
+				$mark = $lines[ $product ];
+				if ( null !== $mark['set'] && abs( (float) $product->get_price( 'edit' ) - $mark['set'] ) < 0.000001 ) {
+					// A rule stopped applying: give back the price it replaced.
+					$product->set_price( $mark['base'] );
+				}
+				$lines[ $product ] = array(
+					'base' => null,
+					'set'  => null,
+				);
 			}
 			$cart->cart_contents[ $key ]['kudora_rules'] = $hits[ $key ];
 		}
@@ -478,6 +527,17 @@ class Kudora_Discount_Engine {
 	}
 
 	/**
+	 * Cart check (classic cart and checkout pages).
+	 *
+	 * @return void
+	 */
+	public function sync_before_check() {
+		if ( function_exists( 'WC' ) && WC()->cart ) {
+			$this->sync_rule_coupons( WC()->cart );
+		}
+	}
+
+	/**
 	 * Keep exactly the matching cart rules applied (priority order, exclusive stops).
 	 *
 	 * @param WC_Cart $cart Cart.
@@ -602,7 +662,7 @@ class Kudora_Discount_Engine {
 					}
 				}
 				$qualifies = $buy_units >= $cfg['buy_qty'] && self::rule_matches( $rule, $ctx, $cart );
-				if ( $qualifies && ! $added_key ) {
+				if ( $qualifies && ! $added_key && ! in_array( (int) $rule['id'], self::gift_optouts(), true ) ) {
 					$cart->add_to_cart( $product_id, $cfg['get_qty'], 0, array(), array( 'kudora_auto_added' => $rule['id'] ) );
 				} elseif ( ! $qualifies && $added_key ) {
 					$cart->remove_cart_item( $added_key );
@@ -611,6 +671,36 @@ class Kudora_Discount_Engine {
 		} finally {
 			self::$adjusting = false;
 		}
+	}
+
+	/**
+	 * Session key: rules whose free gift the customer removed.
+	 */
+	const GIFT_OPTOUT = 'kudora_gift_optout';
+
+	/**
+	 * Rules whose gift the customer removed this session.
+	 *
+	 * @return int[]
+	 */
+	protected static function gift_optouts() {
+		return WC()->session ? array_map( 'intval', (array) WC()->session->get( self::GIFT_OPTOUT, array() ) ) : array();
+	}
+
+	/**
+	 * The customer removed an auto-added gift: do not add it again this session.
+	 *
+	 * @param string  $key  Cart item key.
+	 * @param WC_Cart $cart Cart.
+	 * @return void
+	 */
+	public function remember_gift_removal( $key, $cart ) {
+		if ( self::$adjusting || ! WC()->session || ! $cart instanceof WC_Cart || empty( $cart->removed_cart_contents[ $key ]['kudora_auto_added'] ) ) {
+			return;
+		}
+		$ids   = self::gift_optouts();
+		$ids[] = (int) $cart->removed_cart_contents[ $key ]['kudora_auto_added'];
+		WC()->session->set( self::GIFT_OPTOUT, array_values( array_unique( $ids ) ) );
 	}
 
 	/* ---------------------------------------------------------------------
@@ -666,6 +756,16 @@ class Kudora_Discount_Engine {
 			}
 			$rate->set_cost( 0 );
 			$rate->set_taxes( array() );
+			// Which rules made it free; copied to the order's shipping line, so only a
+			// rule whose free shipping was actually chosen counts as used.
+			$ids = array();
+			foreach ( $rules as $rule ) {
+				$m = isset( $rule['config']['methods'] ) ? array_filter( (array) $rule['config']['methods'] ) : array();
+				if ( ! $m || in_array( $rate->get_method_id(), $m, true ) ) {
+					$ids[] = (int) $rule['id'];
+				}
+			}
+			$rate->add_meta_data( '_kudora_rules', implode( ',', $ids ) );
 		}
 		return $rates;
 	}
@@ -721,8 +821,10 @@ class Kudora_Discount_Engine {
 				$ids[] = self::rule_id( $code );
 			}
 		}
-		if ( ! empty( $order->get_shipping_methods() ) ) {
-			$ids = array_merge( $ids, wp_list_pluck( self::free_shipping_rules(), 'id' ) );
+		foreach ( $order->get_shipping_methods() as $ship ) {
+			if ( (float) $ship->get_total() <= 0 ) {
+				$ids = array_merge( $ids, array_map( 'intval', array_filter( explode( ',', (string) $ship->get_meta( '_kudora_rules' ) ) ) ) );
+			}
 		}
 		$ids = array_values( array_unique( array_filter( $ids ) ) );
 		if ( $ids ) {

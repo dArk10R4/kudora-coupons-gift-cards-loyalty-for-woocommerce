@@ -27,12 +27,77 @@ class Kudora_Importer {
 	const BATCH = 200;
 
 	/**
+	 * How long an uploaded preview waits for "Run import".
+	 */
+	const PREVIEW_TTL = 3600;
+
+	/**
 	 * Hook up.
 	 *
 	 * @return void
 	 */
 	public function register() {
 		add_action( self::BATCH_HOOK, array( __CLASS__, 'run_batch' ), 10, 2 );
+		add_action( 'kudora_daily_tasks', array( __CLASS__, 'cleanup' ) );
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Previews: the parsed rows of an upload, kept in a non-autoloaded option
+	 * (never as a file, and not a transient an object cache could drop).
+	 * ------------------------------------------------------------------- */
+
+	/**
+	 * Store a user's preview.
+	 *
+	 * @param int   $user_id User id.
+	 * @param array $preview type, opts, rows, total, result.
+	 * @return void
+	 */
+	public static function save_preview( $user_id, array $preview ) {
+		$preview['expires'] = time() + self::PREVIEW_TTL;
+		update_option( 'kudora_import_preview_' . (int) $user_id, $preview, false );
+	}
+
+	/**
+	 * A user's pending preview.
+	 *
+	 * @param int $user_id User id.
+	 * @return array|null
+	 */
+	public static function get_preview( $user_id ) {
+		$preview = get_option( 'kudora_import_preview_' . (int) $user_id );
+		if ( ! is_array( $preview ) ) {
+			return null;
+		}
+		if ( empty( $preview['expires'] ) || $preview['expires'] < time() ) {
+			self::clear_preview( $user_id );
+			return null;
+		}
+		return $preview;
+	}
+
+	/**
+	 * Drop a user's preview.
+	 *
+	 * @param int $user_id User id.
+	 * @return void
+	 */
+	public static function clear_preview( $user_id ) {
+		delete_option( 'kudora_import_preview_' . (int) $user_id );
+	}
+
+	/**
+	 * Daily: drop expired previews (their rows hold codes, balances and emails).
+	 *
+	 * @return void
+	 */
+	public static function cleanup() {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- finding our own options by prefix.
+		$names = $wpdb->get_col( $wpdb->prepare( 'SELECT option_name FROM %i WHERE option_name LIKE %s', $wpdb->options, $wpdb->esc_like( 'kudora_import_preview_' ) . '%' ) );
+		foreach ( (array) $names as $name ) {
+			self::get_preview( (int) substr( $name, strlen( 'kudora_import_preview_' ) ) );
+		}
 	}
 
 	/**
@@ -303,23 +368,23 @@ class Kudora_Importer {
 	 * ------------------------------------------------------------------- */
 
 	/**
-	 * Queue a large import.
+	 * Queue a large import. The rows are stored once, apart from the job state that
+	 * every batch rewrites, and deleted when the job ends.
 	 *
-	 * @param string $path File path (kept until done).
+	 * @param array  $rows Parsed rows.
 	 * @param string $type Type.
 	 * @param array  $opts Options.
-	 * @param int    $total Rows.
 	 * @return string Job id.
 	 */
-	public static function queue( $path, $type, array $opts, $total ) {
-		$job = 'k' . wp_generate_password( 10, false, false );
+	public static function queue( array $rows, $type, array $opts ) {
+		$job = 'k' . strtolower( wp_generate_password( 10, false, false ) );
+		update_option( 'kudora_import_' . $job . '_rows', array_values( $rows ), false );
 		update_option(
 			'kudora_import_' . $job,
 			array(
-				'path'    => $path,
 				'type'    => $type,
 				'opts'    => $opts,
-				'total'   => (int) $total,
+				'total'   => count( $rows ),
 				'done'    => 0,
 				'created' => 0,
 				'updated' => 0,
@@ -342,18 +407,19 @@ class Kudora_Importer {
 	 * @return void
 	 */
 	public static function run_batch( $job, $offset ) {
-		$state = get_option( 'kudora_import_' . sanitize_key( $job ) );
+		$job   = sanitize_key( $job );
+		$state = get_option( 'kudora_import_' . $job );
 		if ( ! is_array( $state ) || 'running' !== $state['status'] ) {
 			return;
 		}
-		$data = Kudora_CSV::read( $state['path'] );
-		if ( is_wp_error( $data ) ) {
+		$all = get_option( 'kudora_import_' . $job . '_rows' );
+		if ( ! is_array( $all ) ) {
 			$state['status']   = 'failed';
-			$state['errors'][] = $data->get_error_message();
+			$state['errors'][] = __( 'The import data is missing. Upload the file again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' );
 			update_option( 'kudora_import_' . $job, $state, false );
 			return;
 		}
-		$rows = array_slice( $data['rows'], (int) $offset, self::BATCH );
+		$rows = array_slice( $all, (int) $offset, self::BATCH );
 		$res  = self::run( $state['type'], $rows, $state['opts'], false, (int) $offset );
 		foreach ( array( 'created', 'updated', 'skipped' ) as $k ) {
 			$state[ $k ] += $res[ $k ];
@@ -362,7 +428,7 @@ class Kudora_Importer {
 		$state['done']   = min( $state['total'], (int) $offset + count( $rows ) );
 		if ( $state['done'] >= $state['total'] || ! $rows ) {
 			$state['status'] = 'done';
-			wp_delete_file( $state['path'] );
+			delete_option( 'kudora_import_' . $job . '_rows' );
 		} else {
 			Kudora_Scheduler::async( self::BATCH_HOOK, array( $job, (int) $offset + self::BATCH ) );
 		}

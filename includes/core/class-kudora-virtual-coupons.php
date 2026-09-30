@@ -89,6 +89,23 @@ class Kudora_Virtual_Coupons {
 		add_filter( 'woocommerce_order_recalculate_coupons_coupon_object', array( $this, 'freeze_on_recalculate' ), 10, 3 );
 		add_action( 'woocommerce_checkout_create_order_coupon_item', array( $this, 'store_label' ), 10, 3 );
 		add_filter( 'woocommerce_coupon_message', array( $this, 'silence_message' ), 10, 3 );
+		add_filter( 'woocommerce_coupon_error', array( $this, 'silence_removed' ), 10, 3 );
+	}
+
+	/**
+	 * An automatic discount that stopped applying is removed quietly: no "coupon
+	 * kudora-... is invalid and was removed" notice with an internal code.
+	 *
+	 * @param string         $err      Error message.
+	 * @param int            $err_code Error code.
+	 * @param WC_Coupon|null $coupon   Coupon.
+	 * @return string
+	 */
+	public function silence_removed( $err, $err_code, $coupon = null ) {
+		if ( WC_Coupon::E_WC_COUPON_INVALID_REMOVED === (int) $err_code && $coupon instanceof WC_Coupon && self::is_ours( $coupon->get_code() ) ) {
+			return '';
+		}
+		return $err;
 	}
 
 	/**
@@ -220,8 +237,16 @@ class Kudora_Virtual_Coupons {
 		$frozen = new WC_Coupon();
 		$frozen->set_code( $code );
 		$frozen->set_virtual( true );
-		$frozen->set_discount_type( 'fixed_cart' );
+		$frozen->set_discount_type( Kudora_Coupon_Types::FROZEN );
 		$frozen->set_amount( $amount );
+		// Spread over the lines it could apply to (the rule's scope), never over gift
+		// card purchases; see Kudora_Coupon_Types::frozen_discounts().
+		$scope = array();
+		if ( 0 === strpos( $code, 'kudora-rule-' ) ) {
+			$rule  = Kudora_Rules_Repo::get( (int) substr( $code, strlen( 'kudora-rule-' ) ) );
+			$scope = $rule && isset( $rule['config']['scope'] ) ? (array) $rule['config']['scope'] : array();
+		}
+		$frozen->update_meta_data( '_kudora_frozen_scope', Kudora_Scope::sanitize( $scope ) );
 		return $frozen;
 	}
 

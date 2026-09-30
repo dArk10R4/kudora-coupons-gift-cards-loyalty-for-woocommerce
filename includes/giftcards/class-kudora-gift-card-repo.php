@@ -185,7 +185,21 @@ class Kudora_Gift_Card_Repo {
 	}
 
 	/**
-	 * Create a card and its `issue` ledger row.
+	 * The card an idempotency key was used for.
+	 *
+	 * @param string $key Idempotency key.
+	 * @return int Card id or 0.
+	 */
+	public static function card_for_key( $key ) {
+		global $wpdb;
+		$ledger = self::ledger_table();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table, must read the live row.
+		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT gift_card_id FROM %i WHERE idempotency_key = %s LIMIT 1', $ledger, substr( (string) $key, 0, 120 ) ) );
+	}
+
+	/**
+	 * Create a card and its `issue` ledger row. With a key the call is idempotent:
+	 * a replayed key rolls the new row back and returns the card issued before.
 	 *
 	 * @param array  $data Card fields (code optional: generated when empty).
 	 * @param string $key  Optional idempotency key for the issue row.
@@ -232,24 +246,32 @@ class Kudora_Gift_Card_Repo {
 			'updated_at'      => $now,
 		);
 
-		return Kudora_DB::transaction(
-			function () use ( $wpdb, $row, $amount, $key, $data ) {
-				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- own table.
-				$ok = $wpdb->insert( self::table(), $row );
-				Kudora_DB::check( $ok, 'insert gift card' );
-				$id = (int) $wpdb->insert_id;
-				self::write_ledger( $id, 'issue', $amount, $amount, isset( $data['order_id'] ) ? (int) $data['order_id'] : 0, $key, isset( $data['ledger_note'] ) ? $data['ledger_note'] : '' );
-				self::flush_cache();
-				/**
-				 * Fires after a gift card is created.
-				 *
-				 * @param int   $id  Card id.
-				 * @param array $row Row data.
-				 */
-				do_action( 'kudora_gift_card_created', $id, $row );
-				return $id;
-			}
-		);
+		try {
+			$id = Kudora_DB::transaction(
+				function () use ( $wpdb, $row, $amount, $key, $data ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- own table.
+					$ok = $wpdb->insert( self::table(), $row );
+					Kudora_DB::check( $ok, 'insert gift card' );
+					$id = (int) $wpdb->insert_id;
+					if ( 0 === self::write_ledger( $id, 'issue', $amount, $amount, isset( $data['order_id'] ) ? (int) $data['order_id'] : 0, $key, isset( $data['ledger_note'] ) ? $data['ledger_note'] : '' ) ) {
+						throw new DomainException( 'replayed' );
+					}
+					return $id;
+				}
+			);
+		} catch ( DomainException $e ) {
+			self::flush_cache();
+			return self::card_for_key( $key );
+		}
+		self::flush_cache();
+		/**
+		 * Fires after a gift card is created.
+		 *
+		 * @param int   $id  Card id.
+		 * @param array $row Row data.
+		 */
+		do_action( 'kudora_gift_card_created', $id, $row );
+		return $id;
 	}
 
 	/**
@@ -305,6 +327,7 @@ class Kudora_Gift_Card_Repo {
 					$table = self::table();
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, conditional atomic debit.
 					$affected = $wpdb->query( $wpdb->prepare( "UPDATE %i SET balance = balance - %s, updated_at = %s WHERE id = %d AND status IN ('active','pending') AND balance >= %s AND (expires_on IS NULL OR expires_on >= %s)", $table, wc_format_decimal( $amount, 4 ), Kudora_DB::now(), $id, wc_format_decimal( $amount, 4 ), self::today() ) );
+					Kudora_DB::check( $affected, 'gift card debit' );
 					if ( 1 !== (int) $affected ) {
 						throw new DomainException( 'insufficient' );
 					}
@@ -348,6 +371,7 @@ class Kudora_Gift_Card_Repo {
 					$table = self::table();
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
 					$affected = $wpdb->query( $wpdb->prepare( "UPDATE %i SET balance = balance + %s, updated_at = %s WHERE id = %d", $table, wc_format_decimal( $amount, 4 ), Kudora_DB::now(), $id ) );
+					Kudora_DB::check( $affected, 'gift card credit' );
 					if ( 1 !== (int) $affected ) {
 						throw new RuntimeException( 'card missing' );
 					}
@@ -387,7 +411,8 @@ class Kudora_Gift_Card_Repo {
 						return;
 					}
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table.
-					$wpdb->update( $table, array( 'balance' => $balance, 'updated_at' => Kudora_DB::now() ), array( 'id' => (int) $id ) );
+					$ok = $wpdb->update( $table, array( 'balance' => $balance, 'updated_at' => Kudora_DB::now() ), array( 'id' => (int) $id ) );
+					Kudora_DB::check( $ok, 'set gift card balance' );
 					self::write_ledger( $id, 'adjust', $diff, $balance, 0, null, $note );
 				}
 			);
@@ -396,6 +421,47 @@ class Kudora_Gift_Card_Repo {
 		}
 		self::flush_cache();
 		return true;
+	}
+
+	/**
+	 * Admin adjustment by an amount (not to a value), applied to the balance as it
+	 * is now, so money spent while an edit form was open is never credited back.
+	 * The balance never goes below zero.
+	 *
+	 * @param int    $id    Card id.
+	 * @param float  $delta Signed amount.
+	 * @param string $note  Note.
+	 * @return float|false New balance, or false on failure.
+	 */
+	public static function adjust( $id, $delta, $note = '' ) {
+		global $wpdb;
+		$delta = Kudora_Money::round( $delta );
+		try {
+			$balance = Kudora_DB::transaction(
+				function () use ( $wpdb, $id, $delta, $note ) {
+					$table = self::table();
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- lock the row.
+					$current = $wpdb->get_var( $wpdb->prepare( 'SELECT balance FROM %i WHERE id = %d FOR UPDATE', $table, $id ) );
+					if ( null === $current ) {
+						throw new RuntimeException( 'card missing' );
+					}
+					$balance = max( 0.0, Kudora_Money::round( (float) $current + $delta ) );
+					$diff    = Kudora_Money::round( $balance - (float) $current );
+					if ( abs( $diff ) < 0.00001 ) {
+						return $balance;
+					}
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- own table.
+					$ok = $wpdb->update( $table, array( 'balance' => $balance, 'updated_at' => Kudora_DB::now() ), array( 'id' => (int) $id ) );
+					Kudora_DB::check( $ok, 'adjust gift card' );
+					self::write_ledger( $id, 'adjust', $diff, $balance, 0, null, $note );
+					return $balance;
+				}
+			);
+		} catch ( RuntimeException $e ) {
+			return false;
+		}
+		self::flush_cache();
+		return $balance;
 	}
 
 	/**
@@ -456,7 +522,8 @@ class Kudora_Gift_Card_Repo {
 		$cards  = self::table();
 		$ledger = self::ledger_table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own tables.
-		$wpdb->query( $wpdb->prepare( "UPDATE %i l JOIN %i c ON c.id = l.gift_card_id SET l.balance_after = c.balance WHERE l.id = %d AND c.id = %d", $ledger, $cards, $ledger_id, $card_id ) );
+		$ok = $wpdb->query( $wpdb->prepare( "UPDATE %i l JOIN %i c ON c.id = l.gift_card_id SET l.balance_after = c.balance WHERE l.id = %d AND c.id = %d", $ledger, $cards, $ledger_id, $card_id ) );
+		Kudora_DB::check( $ok, 'ledger balance' );
 	}
 
 	/**

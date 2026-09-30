@@ -7,7 +7,7 @@
  * Requires at least:    6.7
  * Requires PHP:         7.4
  * Requires Plugins:     woocommerce
- * WC requires at least: 9.0
+ * WC requires at least: 9.9
  * WC tested up to:      11.1
  * Author:               nihad1122
  * License:              GPL-2.0-or-later
@@ -32,7 +32,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 define( 'KUDORA_VERSION', '1.0.0' );
-define( 'KUDORA_DB_VERSION', '1' );
+define( 'KUDORA_DB_VERSION', '2' );
+define( 'KUDORA_MIN_WC', '9.9' );
 define( 'KUDORA_FILE', __FILE__ );
 define( 'KUDORA_DIR', plugin_dir_path( __FILE__ ) );
 define( 'KUDORA_URL', plugin_dir_url( __FILE__ ) );

@@ -296,7 +296,9 @@ class Kudora_Admin_Gift_Cards {
 			<table class="widefat striped">
 				<thead><tr><th><?php esc_html_e( 'Date', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></th><th><?php esc_html_e( 'Event', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></th><th><?php esc_html_e( 'Amount', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></th><th><?php esc_html_e( 'Balance after', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></th><th><?php esc_html_e( 'Order', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></th><th><?php esc_html_e( 'Note', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></th></tr></thead>
 				<tbody>
-					<?php foreach ( Kudora_Gift_Card_Repo::ledger( $id ) as $row ) : ?>
+					<?php $kudora_ledger = Kudora_Gift_Card_Repo::ledger( $id ); ?>
+					<?php Kudora_Admin::prime( wp_list_pluck( $kudora_ledger, 'order_id' ) ); ?>
+					<?php foreach ( $kudora_ledger as $row ) : ?>
 						<tr>
 							<td><?php echo esc_html( get_date_from_gmt( $row['created_at'], get_option( 'date_format' ) . ' ' . get_option( 'time_format' ) ) ); ?></td>
 							<td><?php echo esc_html( self::ledger_label( $row['type'] ) ); ?></td>
@@ -377,6 +379,7 @@ class Kudora_Admin_Gift_Cards {
 						<th><label for="kudora_balance"><?php esc_html_e( 'Balance', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></label></th>
 						<td>
 							<input type="text" id="kudora_balance" name="balance" class="short wc_input_price" value="<?php echo esc_attr( wc_format_localized_price( $card['balance'] ) ); ?>" />
+							<input type="hidden" name="balance_was" value="<?php echo esc_attr( wc_format_localized_price( $card['balance'] ) ); ?>" />
 							<input type="text" name="balance_note" class="regular-text" placeholder="<?php esc_attr_e( 'Reason for the change (optional)', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?>" aria-label="<?php esc_attr_e( 'Reason for the change', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?>" />
 						</td>
 					</tr>
@@ -471,13 +474,21 @@ class Kudora_Admin_Gift_Cards {
 				$fields['status'] = 'active';
 			}
 			Kudora_Gift_Card_Repo::update( $id, $fields );
+			$msg = __( 'Gift card saved.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' );
 			if ( isset( $p['balance'] ) && '' !== $p['balance'] ) {
-				$new = Kudora_Money::parse( $p['balance'] );
-				if ( abs( $new - $card['balance'] ) > 0.00001 ) {
-					Kudora_Gift_Card_Repo::set_balance( $id, $new, '' !== $p['balance_note'] ? $p['balance_note'] : __( 'Adjusted by admin', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
+				// Apply what the admin changed in the field, not the field's value: the
+				// customer may have spent part of the card since the form was opened.
+				$was   = isset( $p['balance_was'] ) && '' !== $p['balance_was'] ? Kudora_Money::parse( $p['balance_was'] ) : (float) $card['balance'];
+				$delta = Kudora_Money::round( Kudora_Money::parse( $p['balance'] ) - $was );
+				if ( abs( $delta ) > 0.00001 ) {
+					$now = Kudora_Gift_Card_Repo::adjust( $id, $delta, isset( $p['balance_note'] ) && '' !== $p['balance_note'] ? $p['balance_note'] : __( 'Adjusted by admin', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
+					if ( false !== $now && abs( $now - Kudora_Money::parse( $p['balance'] ) ) > 0.00001 ) {
+						/* translators: 1: signed change, 2: new balance */
+						$msg .= ' ' . sprintf( __( 'The balance changed while you were editing, so your change of %1$s was applied to it: the balance is now %2$s.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), ( $delta > 0 ? '+' : '−' ) . Kudora_Money::plain( abs( $delta ) ), Kudora_Money::plain( $now ) );
+					}
 				}
 			}
-			Kudora_Admin::flash( __( 'Gift card saved.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
+			Kudora_Admin::flash( esc_html( $msg ) );
 			wp_safe_redirect( self::url( array( 'tab' => 'codes', 'card' => $id ) ) );
 			exit;
 		}
@@ -628,6 +639,7 @@ class Kudora_Admin_Gift_Cards {
 				<th><?php esc_html_e( 'Payment method', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></th>
 			</tr></thead>
 			<tbody>
+				<?php Kudora_Admin::prime( wp_list_pluck( $res['rows'], 'order_id' ), wp_list_pluck( $res['rows'], 'purchaser_id' ) ); ?>
 				<?php foreach ( $res['rows'] as $card ) : ?>
 					<?php
 					$order = $card['order_id'] ? wc_get_order( $card['order_id'] ) : null;

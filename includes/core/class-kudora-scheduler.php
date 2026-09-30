@@ -51,13 +51,31 @@ class Kudora_Scheduler {
 	 * @return void
 	 */
 	public function ensure_daily() {
-		if ( ! function_exists( 'as_next_scheduled_action' ) || get_transient( 'kudora_daily_checked' ) ) {
+		if ( get_transient( 'kudora_daily_checked' ) ) {
 			return;
 		}
 		set_transient( 'kudora_daily_checked', 1, HOUR_IN_SECONDS );
+		self::ensure_daily_action();
+	}
+
+	/**
+	 * Schedule the daily action if missing (also on activation). Unique, so two
+	 * requests doing this at once cannot create two.
+	 *
+	 * @return void
+	 */
+	public static function ensure_daily_action() {
+		if ( ! function_exists( 'as_next_scheduled_action' ) || ! function_exists( 'as_schedule_recurring_action' ) ) {
+			return;
+		}
+		if ( ! did_action( 'action_scheduler_init' ) ) {
+			// Too early (e.g. an upgrade on init): once Action Scheduler is ready.
+			add_action( 'action_scheduler_init', array( __CLASS__, 'ensure_daily_action' ) );
+			return;
+		}
 		if ( false === as_next_scheduled_action( self::DAILY, array(), self::GROUP ) ) {
 			$next = new DateTimeImmutable( 'tomorrow 03:00', wp_timezone() );
-			as_schedule_recurring_action( $next->getTimestamp(), DAY_IN_SECONDS, self::DAILY, array(), self::GROUP );
+			as_schedule_recurring_action( $next->getTimestamp(), DAY_IN_SECONDS, self::DAILY, array(), self::GROUP, true );
 		}
 	}
 

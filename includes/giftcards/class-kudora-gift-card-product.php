@@ -22,6 +22,14 @@ class Kudora_Gift_Card_Product {
 	const MESSAGE_MAX = 300;
 
 	/**
+	 * The admin order screen is rendering a line's meta (between WooCommerce's
+	 * before/after itemmeta actions, which only fire there, never in emails).
+	 *
+	 * @var bool
+	 */
+	protected $in_admin_item = false;
+
+	/**
 	 * Hook up.
 	 *
 	 * @return void
@@ -54,6 +62,8 @@ class Kudora_Gift_Card_Product {
 		// Order.
 		add_action( 'woocommerce_checkout_create_order_line_item', array( $this, 'order_line' ), 10, 3 );
 		add_filter( 'woocommerce_order_item_get_formatted_meta_data', array( $this, 'order_line_display' ), 10, 2 );
+		add_action( 'woocommerce_before_order_itemmeta', array( $this, 'admin_item_start' ), 10, 0 );
+		add_action( 'woocommerce_after_order_itemmeta', array( $this, 'admin_item_end' ), 10, 0 );
 	}
 
 	/* ---------------------------------------------------------------------
@@ -674,15 +684,45 @@ class Kudora_Gift_Card_Product {
 		$ids = (array) $item->get_meta( '_kudora_gc_ids' );
 		foreach ( array_filter( $ids ) as $card_id ) {
 			$card = Kudora_Gift_Card_Repo::get( (int) $card_id );
-			if ( $card ) {
-				$meta[ 'kudora_gc_code_' . $card_id ] = (object) array(
-					'key'           => __( 'Gift card code', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ),
-					'value'         => $card['code'],
-					'display_key'   => __( 'Gift card code', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ),
-					'display_value' => '<code>' . esc_html( $card['code'] ) . '</code>',
-				);
+			if ( ! $card ) {
+				continue;
 			}
+			// The full code is the card itself: only the shop's order screen and a buyer
+			// keeping the card see it. A card for someone else stays masked for the buyer
+			// (view order, thank-you page, order emails) until the recipient uses it.
+			if ( $this->in_admin_item || Kudora_Gift_Card_Frontend::is_buyers_own( $card ) ) {
+				$value = $card['code'];
+				$html  = '<code>' . esc_html( $card['code'] ) . '</code>';
+			} else {
+				/* translators: 1: masked gift card code, 2: recipient email */
+				$value = sprintf( __( '%1$s (sent to %2$s)', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Gift_Card_Repo::mask( $card['code'] ), $card['recipient_email'] );
+				$html  = esc_html( $value );
+			}
+			$meta[ 'kudora_gc_code_' . $card_id ] = (object) array(
+				'key'           => __( 'Gift card code', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ),
+				'value'         => $value,
+				'display_key'   => __( 'Gift card code', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ),
+				'display_value' => $html,
+			);
 		}
 		return $meta;
+	}
+
+	/**
+	 * Admin order line meta starts.
+	 *
+	 * @return void
+	 */
+	public function admin_item_start() {
+		$this->in_admin_item = current_user_can( 'edit_shop_orders' );
+	}
+
+	/**
+	 * Admin order line meta ends.
+	 *
+	 * @return void
+	 */
+	public function admin_item_end() {
+		$this->in_admin_item = false;
 	}
 }

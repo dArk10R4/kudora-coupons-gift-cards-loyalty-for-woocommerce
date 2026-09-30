@@ -128,20 +128,33 @@ class Kudora_Gift_Card_Frontend {
 	/**
 	 * Whether the current user may see a card's full code.
 	 *
-	 * @param array  $card    Card.
-	 * @param int    $user_id User id.
-	 * @param string $email   User email (lowercase).
+	 * An email match alone is not proof: WooCommerce never verifies account emails,
+	 * so a card sent to an address is revealed only after it is saved to the account
+	 * with its code (owner) or when it is the buyer's own card.
+	 *
+	 * @param array $card    Card.
+	 * @param int   $user_id User id.
 	 * @return bool
 	 */
-	public static function can_see_code( $card, $user_id, $email ) {
-		if ( (int) $card['owner_id'] === (int) $user_id ) {
+	public static function can_see_code( $card, $user_id ) {
+		$user_id = (int) $user_id;
+		if ( $user_id <= 0 ) {
+			return false;
+		}
+		if ( (int) $card['owner_id'] === $user_id ) {
 			return true;
 		}
-		if ( '' !== $email && $card['recipient_email'] === $email ) {
-			return true;
-		}
-		// Purchasers keep seeing codes they bought for themselves or physical cards.
-		return (int) $card['purchaser_id'] === (int) $user_id && ( $card['is_physical'] || '' === $card['recipient_email'] || strtolower( $card['purchaser_email'] ) === $card['recipient_email'] );
+		return (int) $card['purchaser_id'] === $user_id && self::is_buyers_own( $card );
+	}
+
+	/**
+	 * A card the buyer keeps: bought for themselves, with no recipient, or physical.
+	 *
+	 * @param array $card Card.
+	 * @return bool
+	 */
+	public static function is_buyers_own( $card ) {
+		return ! empty( $card['is_physical'] ) || '' === (string) $card['recipient_email'] || strtolower( (string) $card['purchaser_email'] ) === strtolower( (string) $card['recipient_email'] );
 	}
 
 	/**
@@ -158,21 +171,22 @@ class Kudora_Gift_Card_Frontend {
 			return;
 		}
 		$code = isset( $_POST['kudora_code'] ) ? sanitize_text_field( wp_unslash( $_POST['kudora_code'] ) ) : '';
-		if ( ! Kudora_Gift_Card_Redeem::rate_limit_ok() ) {
+		if ( ! Kudora_Gift_Card_Redeem::lookup_allowed() ) {
 			wc_add_notice( __( 'Too many attempts. Please wait a few minutes and try again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'error' );
 			return;
 		}
 		$card = Kudora_Gift_Card_Repo::get_by_code( $code, true );
 		if ( ! $card || 'disabled' === $card['status'] ) {
-			Kudora_Gift_Card_Redeem::count_failure();
 			wc_add_notice( __( 'This gift card code is not valid.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'error' );
 			return;
 		}
 		$user_id = get_current_user_id();
 		if ( $card['owner_id'] && $card['owner_id'] !== $user_id ) {
+			// Counts as a failed attempt too.
 			wc_add_notice( __( 'This gift card is already saved to another account.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'error' );
 			return;
 		}
+		Kudora_Gift_Card_Redeem::lookup_succeeded();
 		Kudora_Gift_Card_Repo::update( $card['id'], array( 'owner_id' => $user_id ) );
 		wc_add_notice( __( 'The gift card was saved to your account.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		wp_safe_redirect( wc_get_account_endpoint_url( 'gift-cards' ) );
@@ -210,14 +224,14 @@ class Kudora_Gift_Card_Frontend {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function rest_balance( $request ) {
-		if ( ! Kudora_Gift_Card_Redeem::rate_limit_ok() ) {
+		if ( ! Kudora_Gift_Card_Redeem::lookup_allowed() ) {
 			return new WP_Error( 'kudora_rate', __( 'Too many attempts. Please wait a few minutes and try again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), array( 'status' => 429 ) );
 		}
 		$card = Kudora_Gift_Card_Repo::get_by_code( (string) $request['code'], true );
 		if ( ! $card || 'disabled' === $card['status'] ) {
-			Kudora_Gift_Card_Redeem::count_failure();
 			return new WP_Error( 'kudora_not_found', __( 'This gift card code is not valid.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), array( 'status' => 404 ) );
 		}
+		Kudora_Gift_Card_Redeem::lookup_succeeded();
 		$expired = Kudora_Gift_Card_Repo::is_expired( $card ) || 'expired' === $card['status'];
 		return rest_ensure_response(
 			array(

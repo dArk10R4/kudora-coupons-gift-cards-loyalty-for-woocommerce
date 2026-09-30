@@ -51,6 +51,12 @@ class Kudora_Smart_Coupons {
 
 		// Auto-apply + URL coupons.
 		add_action( 'woocommerce_before_calculate_totals', array( $this, 'auto_apply' ), 26 );
+		// Keep the auto-apply list right however a coupon changes (quick/bulk edit,
+		// REST, import, status change, trash, delete), not only on the edit screen.
+		add_action( 'woocommerce_new_coupon', array( __CLASS__, 'refresh_auto_list' ), 20, 0 );
+		add_action( 'woocommerce_update_coupon', array( __CLASS__, 'refresh_auto_list' ), 20, 0 );
+		add_action( 'transition_post_status', array( $this, 'coupon_status_changed' ), 20, 3 );
+		add_action( 'deleted_post', array( $this, 'coupon_deleted' ), 20, 2 );
 		add_action( 'woocommerce_removed_coupon', array( $this, 'remember_removal' ) );
 		add_action( 'wp_loaded', array( $this, 'url_coupon' ), 30 );
 		add_action( 'woocommerce_add_to_cart', array( $this, 'apply_pending' ), 40 );
@@ -146,6 +152,33 @@ class Kudora_Smart_Coupons {
 			)
 		);
 		update_option( self::AUTO_OPTION, array_map( 'intval', $q->posts ), true );
+	}
+
+	/**
+	 * A coupon changed status (publish, draft, schedule, private, trash).
+	 *
+	 * @param string  $new  New status.
+	 * @param string  $old  Old status.
+	 * @param WP_Post $post Post.
+	 * @return void
+	 */
+	public function coupon_status_changed( $new, $old, $post ) {
+		if ( $new !== $old && $post instanceof WP_Post && 'shop_coupon' === $post->post_type ) {
+			self::refresh_auto_list();
+		}
+	}
+
+	/**
+	 * A coupon was deleted.
+	 *
+	 * @param int          $post_id Post id.
+	 * @param WP_Post|null $post    Post.
+	 * @return void
+	 */
+	public function coupon_deleted( $post_id, $post = null ) {
+		if ( $post instanceof WP_Post && 'shop_coupon' === $post->post_type ) {
+			self::refresh_auto_list();
+		}
 	}
 
 	/**
@@ -333,6 +366,12 @@ class Kudora_Smart_Coupons {
 			$coupon = new WC_Coupon( (int) $id );
 			$code   = wc_format_coupon_code( $coupon->get_code() );
 			if ( ! $coupon->get_id() || in_array( $code, $applied, true ) || in_array( $code, $optout, true ) ) {
+				continue;
+			}
+			// Only a published coupon its code resolves to: WooCommerce looks codes up
+			// among published coupons and would remove anything else with an error,
+			// on every calculation.
+			if ( 'publish' !== get_post_status( $coupon->get_id() ) || (int) wc_get_coupon_id_by_code( $code ) !== (int) $coupon->get_id() ) {
 				continue;
 			}
 			// Respect individual-use coupons already in the cart.

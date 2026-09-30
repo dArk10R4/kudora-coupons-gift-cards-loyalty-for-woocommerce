@@ -184,26 +184,39 @@ class Kudora_Rewards {
 	/**
 	 * Claim: atomic points debit, then create the coupon (points go back if that fails).
 	 *
+	 * The request id makes a claim idempotent: replaying it (double click, retried
+	 * call) returns the coupon that request already produced instead of a new one.
+	 *
 	 * @param string $reward_id Reward id.
 	 * @param int    $user_id   User id.
 	 * @param string $request   Client request id (double-click protection).
 	 * @return int|WP_Error Coupon id.
 	 */
 	public static function claim( $reward_id, $user_id, $request = '' ) {
-		$reward = self::get( $reward_id );
-		if ( ! $reward ) {
+		$user_id = (int) $user_id;
+		$reward  = self::get( $reward_id );
+		if ( ! $reward || $user_id <= 0 ) {
 			return new WP_Error( 'kudora_reward', __( 'This reward is not available.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
-		}
-		$why = self::why_not( $reward, $user_id );
-		if ( '' !== $why ) {
-			return new WP_Error( 'kudora_reward', $why );
 		}
 		$lock = 'reward_' . $user_id;
 		if ( ! Kudora_DB::lock( $lock, 5 ) ) {
 			return new WP_Error( 'kudora_reward_busy', __( 'Please try again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
 		try {
-			$key = 'reward:' . $user_id . ':' . ( '' !== $request ? substr( sanitize_key( $request ), 0, 40 ) : wp_generate_uuid4() );
+			$request = substr( sanitize_key( $request ), 0, 40 );
+			$key     = 'reward:' . $user_id . ':' . ( '' !== $request ? $request : wp_generate_uuid4() );
+			$done    = self::coupon_for_key( $user_id, $key );
+			if ( $done ) {
+				return $done;
+			}
+			if ( Kudora_Points_Repo::key_used( $key ) ) {
+				return new WP_Error( 'kudora_reward_replay', __( 'This reward request was already processed. Please reload the page.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
+			}
+			// Checked under the lock so parallel claims cannot pass the per-customer limit.
+			$why = self::why_not( $reward, $user_id );
+			if ( '' !== $why ) {
+				return new WP_Error( 'kudora_reward', $why );
+			}
 			$res = Kudora_Points_Repo::deduct(
 				$user_id,
 				$reward['cost'],
@@ -217,17 +230,17 @@ class Kudora_Rewards {
 			if ( is_wp_error( $res ) ) {
 				return $res;
 			}
-			$coupon_id = self::create_coupon( $reward, $user_id );
+			$coupon_id = self::create_coupon( $reward, $user_id, $key );
 			if ( is_wp_error( $coupon_id ) ) {
-				Kudora_Points_Repo::add(
+				Kudora_Points_Repo::restore(
 					$user_id,
+					$key,
 					$reward['cost'],
 					'restored',
 					array(
 						'entity_type' => 'reward',
 						'note'        => $reward['name'],
 						'key'         => $key . ':undo',
-						'lifetime'    => false,
 					)
 				);
 				return $coupon_id;
@@ -240,13 +253,44 @@ class Kudora_Rewards {
 	}
 
 	/**
+	 * The coupon a claim request already produced.
+	 *
+	 * @param int    $user_id User id.
+	 * @param string $key     Claim key.
+	 * @return int Coupon id or 0.
+	 */
+	protected static function coupon_for_key( $user_id, $key ) {
+		$q = new WP_Query(
+			array(
+				'post_type'      => 'shop_coupon',
+				'post_status'    => array( 'publish', 'draft', 'pending', 'private', 'trash' ),
+				'fields'         => 'ids',
+				'posts_per_page' => 1,
+				'no_found_rows'  => true,
+				'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- rare customer action.
+					array(
+						'key'   => '_kudora_reward_user',
+						'value' => (int) $user_id,
+					),
+					array(
+						'key'   => '_kudora_reward_key',
+						'value' => $key,
+					),
+				),
+			)
+		);
+		return $q->posts ? (int) $q->posts[0] : 0;
+	}
+
+	/**
 	 * Create the reward coupon.
 	 *
-	 * @param array $reward  Reward.
-	 * @param int   $user_id User id.
+	 * @param array  $reward  Reward.
+	 * @param int    $user_id User id.
+	 * @param string $key     Claim key (links the coupon to its request).
 	 * @return int|WP_Error
 	 */
-	protected static function create_coupon( array $reward, $user_id ) {
+	protected static function create_coupon( array $reward, $user_id, $key ) {
 		$user = get_userdata( $user_id );
 		if ( ! $user ) {
 			return new WP_Error( 'kudora_user', 'No user.' );
@@ -301,6 +345,7 @@ class Kudora_Rewards {
 			$coupon->update_meta_data( '_kudora_reward', $reward['id'] );
 			$coupon->update_meta_data( '_kudora_reward_user', $user_id );
 			$coupon->update_meta_data( '_kudora_reward_cost', $reward['cost'] );
+			$coupon->update_meta_data( '_kudora_reward_key', $key );
 			$id = $coupon->save();
 		} catch ( Exception $e ) {
 			return new WP_Error( 'kudora_coupon', $e->getMessage() );

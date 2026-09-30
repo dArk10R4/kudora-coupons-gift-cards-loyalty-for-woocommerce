@@ -38,7 +38,7 @@ class Kudora_Rule_Calc {
 				'unit'      => (float) $item->price / (int) $item->quantity,
 				'available' => $available,
 				'product'   => $item->product,
-				'is_gc'     => is_array( $item->object ) ? ! empty( $item->object['kudora_gc'] ) : false,
+				'is_gc'     => is_array( $item->object ) ? ! empty( $item->object['kudora_gc'] ) : ( $item->object instanceof WC_Order_Item_Product && is_array( $item->object->get_meta( '_kudora_gc_data' ) ) ),
 			);
 		}
 		return $lines;

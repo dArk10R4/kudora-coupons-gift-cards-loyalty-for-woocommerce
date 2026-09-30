@@ -225,6 +225,31 @@ class Kudora_Admin {
 		return $names;
 	}
 
+	/**
+	 * Load the orders and users a list shows in bulk (instead of one query per row).
+	 *
+	 * @param array $order_ids Order ids.
+	 * @param array $user_ids  User ids.
+	 * @return void
+	 */
+	public static function prime( array $order_ids = array(), array $user_ids = array() ) {
+		$order_ids = array_values( array_unique( array_filter( array_map( 'intval', $order_ids ) ) ) );
+		if ( $order_ids ) {
+			wc_get_orders(
+				array(
+					'include' => $order_ids,
+					'limit'   => count( $order_ids ),
+					'type'    => 'shop_order',
+					'status'  => array_keys( wc_get_order_statuses() ),
+				)
+			);
+		}
+		$user_ids = array_values( array_unique( array_filter( array_map( 'intval', $user_ids ) ) ) );
+		if ( $user_ids ) {
+			cache_users( $user_ids );
+		}
+	}
+
 	/* ---------------------------------------------------------------------
 	 * Order box
 	 * ------------------------------------------------------------------- */
@@ -285,7 +310,11 @@ class Kudora_Admin {
 	}
 
 	/**
-	 * Refund as store credit: a new gift card emailed to the customer.
+	 * Refund as store credit: a WooCommerce refund (no money sent back) paid out as a
+	 * new gift card emailed to the customer. Being a real refund, it is capped by what
+	 * is left to refund, shows in the order totals and reports, stops a later money
+	 * refund of the same amount, and takes back the earned points like any refund.
+	 * What gift cards paid is refunded with "Refund to card" instead.
 	 *
 	 * @param WC_Order $order  Order.
 	 * @param float    $amount Amount.
@@ -293,33 +322,61 @@ class Kudora_Admin {
 	 */
 	public static function issue_store_credit( $order, $amount ) {
 		$amount = Kudora_Money::round( $amount );
-		$max    = Kudora_Money::round( (float) $order->get_total() + Kudora_Gift_Card_Redeem::order_amount( $order ) - (float) $order->get_meta( '_kudora_store_credit_total' ) );
-		if ( $amount <= 0 || $amount > $max + 0.00001 ) {
-			/* translators: %s: amount */
-			return new WP_Error( 'kudora_amount', sprintf( __( 'Enter an amount between 0 and %s.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Money::plain( $max ) ) );
+		$lock   = 'order_refund_' . $order->get_id();
+		if ( ! Kudora_DB::lock( $lock, 5 ) ) {
+			return new WP_Error( 'kudora_busy', __( 'Please try again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
 		try {
-			$id = Kudora_Gift_Card_Repo::create(
+			$order = wc_get_order( $order->get_id() );
+			$max   = Kudora_Money::round( (float) $order->get_remaining_refund_amount() );
+			if ( $amount <= 0 || $amount > $max + 0.00001 ) {
+				/* translators: %s: amount */
+				return new WP_Error( 'kudora_amount', sprintf( __( 'Enter an amount between 0 and %s (what is left to refund of the money paid; use "Refund to card" for what gift cards paid).', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Money::plain( $max ) ) );
+			}
+			$refund = wc_create_refund(
 				array(
-					'initial_amount'  => $amount,
-					'order_id'        => $order->get_id(),
-					'purchaser_id'    => $order->get_customer_id(),
-					'purchaser_email' => $order->get_billing_email(),
-					'owner_id'        => $order->get_customer_id(),
-					'recipient_name'  => trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() ),
-					'recipient_email' => $order->get_billing_email(),
-					'sender_name'     => get_bloginfo( 'name' ),
-					'source'          => 'refund',
-					/* translators: %s: order number */
-					'ledger_note'     => sprintf( __( 'Store credit for order #%s', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), $order->get_order_number() ),
+					'amount'         => $amount,
+					'reason'         => __( 'Store credit (gift card)', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ),
+					'order_id'       => $order->get_id(),
+					'refund_payment' => false,
+					'restock_items'  => false,
 				)
 			);
-		} catch ( RuntimeException $e ) {
-			return new WP_Error( 'kudora_card', $e->getMessage() );
+			if ( is_wp_error( $refund ) ) {
+				return $refund;
+			}
+			try {
+				$id = Kudora_Gift_Card_Repo::create(
+					array(
+						'initial_amount'  => $amount,
+						'order_id'        => $order->get_id(),
+						'purchaser_id'    => $order->get_customer_id(),
+						'purchaser_email' => $order->get_billing_email(),
+						'owner_id'        => $order->get_customer_id(),
+						'recipient_name'  => trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() ),
+						'recipient_email' => $order->get_billing_email(),
+						'sender_name'     => get_bloginfo( 'name' ),
+						'source'          => 'refund',
+						/* translators: %s: order number */
+						'ledger_note'     => sprintf( __( 'Store credit for order #%s', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), $order->get_order_number() ),
+					),
+					'store-credit:refund:' . $refund->get_id()
+				);
+			} catch ( RuntimeException $e ) {
+				$refund->delete( true );
+				wc_delete_shop_order_transients( $order );
+				return new WP_Error( 'kudora_card', $e->getMessage() );
+			}
+			$card = Kudora_Gift_Card_Repo::get( $id );
+			/* translators: %s: masked gift card code */
+			$refund->set_reason( sprintf( __( 'Store credit: gift card %s', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Gift_Card_Repo::mask( $card['code'] ) ) );
+			$refund->update_meta_data( '_kudora_store_credit_card', $id );
+			$refund->save();
+			$order->update_meta_data( '_kudora_store_credit_total', Kudora_Money::round( (float) $order->get_meta( '_kudora_store_credit_total' ) + $amount ) );
+			$order->save_meta_data();
+		} finally {
+			Kudora_DB::unlock( $lock );
 		}
-		$order->update_meta_data( '_kudora_store_credit_total', Kudora_Money::round( (float) $order->get_meta( '_kudora_store_credit_total' ) + $amount ) );
-		$order->save_meta_data();
-		$card = Kudora_Gift_Card_Repo::get( $id );
 		/* translators: 1: amount, 2: masked code */
 		$order->add_order_note( sprintf( __( 'Issued %1$s store credit as gift card %2$s.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Money::plain( $amount ), Kudora_Gift_Card_Repo::mask( $card['code'] ) ) );
 		( new Kudora_Gift_Card_Issuer() )->deliver( $id );

@@ -23,11 +23,23 @@ class Kudora_Coupon_Types {
 	const FREE_PRODUCT = 'kudora_free_product';
 
 	/**
+	 * A Kudora discount frozen at its recorded amount when an order is recalculated.
+	 */
+	const FROZEN = 'kudora_frozen';
+
+	/**
 	 * Discount given so far per capped coupon in the current calculation.
 	 *
 	 * @var array<string,float>
 	 */
 	protected static $given = array();
+
+	/**
+	 * Items (and the WC_Discounts object) captured for free-product coupons.
+	 *
+	 * @var array<string,array>
+	 */
+	protected static $captured = array();
 
 	/**
 	 * Hook up.
@@ -37,7 +49,9 @@ class Kudora_Coupon_Types {
 	public function register() {
 		add_filter( 'woocommerce_coupon_discount_types', array( $this, 'types' ) );
 		add_filter( 'woocommerce_cart_coupon_types', array( $this, 'cart_types' ) );
+		add_filter( 'woocommerce_coupon_get_items_to_apply', array( $this, 'capture_items' ), 10, 3 );
 		add_filter( 'woocommerce_coupon_custom_discounts_array', array( $this, 'free_product_discounts' ), 10, 2 );
+		add_filter( 'woocommerce_order_recalculate_coupons_coupon_object', array( $this, 'cap_on_order' ), 20, 4 );
 		add_action( 'woocommerce_applied_coupon', array( $this, 'add_free_product' ), 20 );
 		add_action( 'woocommerce_before_calculate_totals', array( $this, 'reset_caps' ), 1 );
 		add_filter( 'woocommerce_coupon_get_discount_amount', array( $this, 'cap' ), 100, 5 );
@@ -53,6 +67,7 @@ class Kudora_Coupon_Types {
 	 */
 	public function types( $types ) {
 		$types[ self::FREE_PRODUCT ] = __( 'Free product', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' );
+		$types[ self::FROZEN ]       = __( 'Recorded discount', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' );
 		return $types;
 	}
 
@@ -64,6 +79,7 @@ class Kudora_Coupon_Types {
 	 */
 	public function cart_types( $types ) {
 		$types[] = self::FREE_PRODUCT;
+		$types[] = self::FROZEN;
 		return $types;
 	}
 
@@ -79,13 +95,36 @@ class Kudora_Coupon_Types {
 	}
 
 	/**
-	 * One unit of the product (cheapest matching line) is free.
+	 * Remember the items a free-product coupon is applied to (cart or order).
+	 *
+	 * @param array        $items     Items.
+	 * @param WC_Coupon    $coupon    Coupon.
+	 * @param WC_Discounts $discounts Discounts.
+	 * @return array
+	 */
+	public function capture_items( $items, $coupon, $discounts ) {
+		if ( in_array( $coupon->get_discount_type(), array( self::FREE_PRODUCT, self::FROZEN ), true ) ) {
+			self::$captured[ $coupon->get_code() ] = array(
+				'items'     => $items,
+				'discounts' => $discounts,
+			);
+		}
+		return $items;
+	}
+
+	/**
+	 * Units of the product (cheapest matching lines first) are free, never more
+	 * than what is left of each line after earlier coupons. Works for carts and
+	 * for orders (admin recalculation, REST).
 	 *
 	 * @param array     $discounts Cart item key => discount (cents).
 	 * @param WC_Coupon $coupon    Coupon.
 	 * @return array
 	 */
 	public function free_product_discounts( $discounts, $coupon ) {
+		if ( self::FROZEN === $coupon->get_discount_type() ) {
+			return self::frozen_discounts( $discounts, $coupon );
+		}
 		if ( self::FREE_PRODUCT !== $coupon->get_discount_type() ) {
 			return $discounts;
 		}
@@ -94,35 +133,70 @@ class Kudora_Coupon_Types {
 		foreach ( $discounts as $k => $v ) {
 			$discounts[ $k ] = 0;
 		}
-		if ( ! $product_id || ! function_exists( 'WC' ) || ! WC()->cart ) {
+		$code = $coupon->get_code();
+		if ( ! $product_id || ! isset( self::$captured[ $code ] ) ) {
 			return $discounts;
 		}
 		$lines = array();
-		foreach ( WC()->cart->get_cart() as $key => $item ) {
-			if ( ! array_key_exists( $key, $discounts ) ) {
+		foreach ( Kudora_Rule_Calc::lines_from_discount_items( self::$captured[ $code ]['items'], self::$captured[ $code ]['discounts'] ) as $line ) {
+			$product = $line['product'];
+			if ( ! array_key_exists( $line['key'], $discounts ) || ! $product instanceof WC_Product ) {
 				continue;
 			}
-			if ( (int) $item['product_id'] === $product_id || (int) $item['variation_id'] === $product_id ) {
-				$lines[] = array(
-					'key'   => $key,
-					'price' => wc_add_number_precision( (float) $item['data']->get_price( 'edit' ) ),
-					'qty'   => (int) $item['quantity'],
-				);
+			if ( $product->get_id() === $product_id || $product->get_parent_id() === $product_id ) {
+				$lines[] = $line;
 			}
 		}
 		usort(
 			$lines,
 			function ( $a, $b ) {
-				return $a['price'] <=> $b['price'];
+				return $a['unit'] <=> $b['unit'];
 			}
 		);
 		foreach ( $lines as $line ) {
 			if ( $units <= 0 ) {
 				break;
 			}
-			$take                        = min( $units, $line['qty'] );
-			$discounts[ $line['key'] ]  += $take * $line['price'];
-			$units                      -= $take;
+			$take                      = min( $units, $line['qty'] );
+			$discounts[ $line['key'] ] = min( $line['available'], $take * $line['unit'] );
+			$units                    -= $take;
+		}
+		return $discounts;
+	}
+
+	/**
+	 * A frozen Kudora discount: its recorded amount spread over the lines in its
+	 * scope in proportion to what is left of them, skipping gift card purchases.
+	 *
+	 * @param array     $discounts Line key => discount (cents).
+	 * @param WC_Coupon $coupon    Coupon.
+	 * @return array
+	 */
+	protected static function frozen_discounts( $discounts, $coupon ) {
+		foreach ( $discounts as $k => $v ) {
+			$discounts[ $k ] = 0;
+		}
+		$code = $coupon->get_code();
+		if ( ! isset( self::$captured[ $code ] ) ) {
+			return $discounts;
+		}
+		$scope   = (array) $coupon->get_meta( '_kudora_frozen_scope' );
+		$weights = array();
+		foreach ( Kudora_Rule_Calc::lines_from_discount_items( self::$captured[ $code ]['items'], self::$captured[ $code ]['discounts'] ) as $line ) {
+			if ( $line['is_gc'] || ! array_key_exists( $line['key'], $discounts ) || $line['available'] <= 0 ) {
+				continue;
+			}
+			if ( ! Kudora_Scope::is_all( $scope ) && ( ! $line['product'] instanceof WC_Product || ! Kudora_Scope::matches_product( $scope, $line['product'] ) ) ) {
+				continue;
+			}
+			$weights[ $line['key'] ] = $line['available'];
+		}
+		if ( ! $weights ) {
+			return $discounts;
+		}
+		$total = min( array_sum( $weights ), wc_add_number_precision( (float) $coupon->get_amount() ) );
+		foreach ( Kudora_Rule_Calc::distribute( $weights, $total ) as $key => $cents ) {
+			$discounts[ $key ] = $cents;
 		}
 		return $discounts;
 	}
@@ -193,6 +267,42 @@ class Kudora_Coupon_Types {
 		$final = min( (float) $discount, $room );
 		self::$given[ $code ] = $given + $final;
 		return $final;
+	}
+
+	/**
+	 * Orders (admin recalculation, "Apply coupon" on an order, REST): WooCommerce
+	 * only runs the legacy per-line filter for carts, so a capped percentage coupon
+	 * is applied as the fixed amount it is worth, never above its cap.
+	 *
+	 * @param WC_Coupon            $coupon Coupon object used for the recalculation.
+	 * @param string               $code   Code.
+	 * @param WC_Order_Item_Coupon $item   Coupon line.
+	 * @param WC_Order             $order  Order.
+	 * @return WC_Coupon
+	 */
+	public function cap_on_order( $coupon, $code, $item = null, $order = null ) {
+		if ( ! $coupon instanceof WC_Coupon || 'percent' !== $coupon->get_discount_type() || ! $order instanceof WC_Order ) {
+			return $coupon;
+		}
+		$stored = $coupon->get_id() ? $coupon : new WC_Coupon( $code );
+		$max    = (float) $stored->get_meta( '_kudora_max_discount' );
+		if ( $max <= 0 ) {
+			return $coupon;
+		}
+		$base = 0.0;
+		foreach ( $order->get_items() as $line ) {
+			$product = $line instanceof WC_Order_Item_Product ? $line->get_product() : null;
+			if ( $product && $coupon->is_valid_for_product( $product, array() ) ) {
+				$base += (float) $line->get_subtotal();
+			}
+		}
+		$worth = Kudora_Money::round( $base * min( 100, (float) $coupon->get_amount() ) / 100 );
+		if ( $worth <= $max ) {
+			return $coupon;
+		}
+		$coupon->set_discount_type( 'fixed_cart' );
+		$coupon->set_amount( $max );
+		return $coupon;
 	}
 
 	/**
