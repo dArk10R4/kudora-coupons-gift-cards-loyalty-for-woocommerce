@@ -109,7 +109,7 @@ class Kudora_Smart_Coupons {
 		$to       = isset( $_POST['_kudora_time_to'] ) ? sanitize_text_field( wp_unslash( $_POST['_kudora_time_to'] ) ) : '';
 		$auto     = isset( $_POST['_kudora_auto_apply'] ) ? 'yes' : 'no';
 		$conds    = isset( $_POST['kudora_conditions'] ) ? Kudora_Conditions::sanitize( json_decode( wp_unslash( $_POST['kudora_conditions'] ), true ) ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- JSON sanitised by Kudora_Conditions::sanitize().
-		$bxgy     = isset( $_POST['kudora_bxgy'] ) ? Kudora_Rule_Calc::sanitize_bxgy( json_decode( wp_unslash( $_POST['kudora_bxgy'] ), true ) ) : null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- JSON sanitised by sanitize_bxgy().
+		$bxgy     = isset( $_POST['kudora_bxgy'] ) && is_array( $_POST['kudora_bxgy'] ) ? Kudora_Rule_Calc::sanitize_bxgy( map_deep( wp_unslash( $_POST['kudora_bxgy'] ), 'sanitize_text_field' ) ) : null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitised by map_deep + sanitize_bxgy().
 		// phpcs:enable
 		$coupon->update_meta_data( '_kudora_start', preg_match( '/^\d{4}-\d{2}-\d{2}$/', $start ) ? $start : '' );
 		$coupon->update_meta_data( '_kudora_weekdays', $weekdays );

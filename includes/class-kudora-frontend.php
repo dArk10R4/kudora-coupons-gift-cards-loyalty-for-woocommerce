@@ -21,7 +21,9 @@ class Kudora_Frontend {
 	 * @return void
 	 */
 	public function register() {
-		add_action( 'wp_enqueue_scripts', array( $this, 'register_assets' ), 5 );
+		// Register early: block themes render blocks (and their shortcodes) before wp_enqueue_scripts.
+		add_action( 'init', array( $this, 'register_assets' ), 20 );
+		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ), 5 );
 		add_action( 'init', array( $this, 'add_endpoints' ) );
 		add_filter( 'woocommerce_get_query_vars', array( $this, 'query_vars' ) );
 		add_filter( 'woocommerce_account_menu_items', array( $this, 'menu_items' ), 20 );
@@ -52,6 +54,9 @@ class Kudora_Frontend {
 	 * @return void
 	 */
 	public function register_assets() {
+		if ( is_admin() && ! wp_doing_ajax() ) {
+			return;
+		}
 		wp_register_style( 'kudora-frontend', KUDORA_URL . 'assets/css/frontend.css', array(), KUDORA_VERSION );
 		wp_register_script( 'kudora-gift-card-form', KUDORA_URL . 'assets/js/gift-card-form.js', array(), KUDORA_VERSION, true );
 		wp_localize_script(
@@ -83,7 +88,14 @@ class Kudora_Frontend {
 			)
 		);
 
-		// Classic cart and checkout pages carry our rows/forms.
+	}
+
+	/**
+	 * Classic cart and checkout pages carry our rows/forms.
+	 *
+	 * @return void
+	 */
+	public function enqueue_assets() {
 		if ( function_exists( 'is_cart' ) && ( is_cart() || is_checkout() ) ) {
 			wp_enqueue_style( 'kudora-frontend' );
 			wp_enqueue_script( 'kudora-classic' );

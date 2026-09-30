@@ -59,14 +59,14 @@ $kudora_bxgy  = Kudora_Rule_Calc::sanitize_bxgy( $coupon->get_meta( '_kudora_bxg
 			<code><?php echo esc_html( $coupon->get_code() ? add_query_arg( $kudora_param, rawurlencode( $coupon->get_code() ), home_url( '/' ) ) : __( 'Save the coupon to get its link.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) ); ?></code>
 		</p>
 	</div>
-	<div class="options_group">
-		<p class="form-field"><strong><?php esc_html_e( 'Conditions', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></strong></p>
-		<div class="kudora-conditions" data-kudora-conditions data-input="kudora_conditions"></div>
-		<input type="hidden" name="kudora_conditions" id="kudora_conditions" value="<?php echo esc_attr( wp_json_encode( is_array( $coupon->get_meta( '_kudora_conditions' ) ) ? $coupon->get_meta( '_kudora_conditions' ) : array() ) ); ?>" />
+	<div class="options_group kudora-panel-pad">
+		<p><strong><?php esc_html_e( 'Conditions', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></strong> <span class="description"><?php esc_html_e( 'All must be true for the coupon to work.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></span></p>
+		<?php Kudora_Admin_Fields::conditions( 'kudora_conditions', is_array( $coupon->get_meta( '_kudora_conditions' ) ) ? $coupon->get_meta( '_kudora_conditions' ) : array() ); ?>
 	</div>
 </div>
 <div id="kudora_bxgy_coupon_data" class="panel woocommerce_options_panel hidden">
-	<p class="kudora-panel-intro"><?php esc_html_e( 'Used when the discount type is "Buy X get Y (BOGO)".', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></p>
-	<div class="kudora-bxgy" data-kudora-bxgy data-input="kudora_bxgy"></div>
-	<input type="hidden" name="kudora_bxgy" id="kudora_bxgy" value="<?php echo esc_attr( wp_json_encode( $kudora_bxgy ) ); ?>" />
+	<div class="options_group kudora-panel-pad">
+		<p class="kudora-panel-intro"><?php esc_html_e( 'Used when the discount type is "Buy X get Y (BOGO)".', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></p>
+		<?php Kudora_Admin_Fields::bxgy( 'kudora_bxgy', $kudora_bxgy, false ); ?>
+	</div>
 </div>

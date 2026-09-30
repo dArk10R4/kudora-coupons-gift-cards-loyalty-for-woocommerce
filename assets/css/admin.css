@@ -1,0 +1,79 @@
+/* Kudora — admin. */
+.kudora-admin .nav-tab-wrapper { margin-bottom: 16px; }
+.kudora-card-box { background: #fff; border: 1px solid #dcdcde; border-radius: 6px; padding: 16px 20px; margin: 0 0 16px; box-sizing: border-box; }
+.kudora-card-box h2 { margin-top: 0; font-size: 1.15em; }
+.kudora-columns { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.kudora-columns > .kudora-card-box { flex: 1 1 360px; min-width: 0; }
+.kudora-columns > .kudora-grow { flex: 3 1 520px; }
+.kudora-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kudora-liability { margin-left: auto; }
+.kudora-filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0 12px; }
+.kudora-filters label { display: inline-flex; gap: 6px; align-items: center; }
+.kudora-inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.kudora-settings-link { margin: 0 0 8px; }
+
+/* Badges & toggles */
+.kudora-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: #f0f0f1; border: 1px solid #dcdcde; margin-left: 4px; }
+.kudora-badge-active { background: #e7f6ec; color: #135c2f; border-color: #bfe5cc; }
+.kudora-badge-expired, .kudora-badge-disabled { background: #fbeaea; color: #8a1f1f; border-color: #f0c9c9; }
+.kudora-badge-pending, .kudora-badge-inactive { background: #fff5e0; color: #7a4d00; border-color: #f1dcae; }
+.kudora-tier-badge { --kudora-tier: #1f2a44; display: inline-block; padding: 2px 10px; border-radius: 999px; background: var(--kudora-tier); color: #fff; font-weight: 600; font-size: 12px; margin-left: 6px; }
+.kudora-toggle { display: inline-block; width: 36px; height: 20px; border-radius: 999px; background: #c3c4c7; position: relative; vertical-align: middle; transition: background .15s; }
+.kudora-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; }
+.kudora-toggle.is-on { background: #2271b1; }
+.kudora-toggle.is-on::after { left: 18px; }
+.kudora-toggle:focus-visible { outline: 2px solid #2271b1; outline-offset: 2px; }
+.kudora-minus { color: #8a1f1f; }
+.kudora-plus { color: #135c2f; }
+
+/* Stats (Booknetic cards) */
+.kudora-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 0 0 12px; }
+.kudora-stat { background: #fff; border: 1px solid #dcdcde; border-radius: 6px; padding: 12px 16px; }
+.kudora-stat span { display: block; color: #50575e; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.kudora-stat strong { font-size: 22px; }
+
+/* Rule editor */
+.kudora-rule-form .form-table th { width: 200px; }
+.kudora-scope { border: 1px solid #dcdcde; border-radius: 6px; padding: 8px 14px 4px; margin: 12px 0; }
+.kudora-scope legend { font-weight: 600; padding: 0 4px; }
+.kudora-scope p { margin: 8px 0; }
+.kudora-scope label { display: block; font-weight: 500; margin-bottom: 2px; }
+.kudora-scope select { min-width: 320px; max-width: 100%; }
+.kudora-ranges { max-width: 640px; }
+.kudora-ranges td, .kudora-repeat td { vertical-align: middle; }
+.kudora-remove-row, .kudora-c-remove { font-size: 18px; line-height: 1; color: #b32d2e; text-decoration: none; }
+.kudora-c-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed #dcdcde; }
+.kudora-c-rows:empty + p::before { content: ""; }
+.kudora-panel-pad { padding: 4px 12px 8px; }
+.kudora-panel-intro { margin: 10px 12px; }
+.kudora-weekdays label { margin-right: 8px; float: none !important; width: auto !important; margin-left: 0 !important; }
+.woocommerce_options_panel .kudora-scope label, .woocommerce_options_panel .kudora-bxgy-fields label { float: none; width: auto; margin: 0 0 2px; }
+.woocommerce_options_panel .kudora-bxgy-fields { padding: 0 12px; }
+.woocommerce_options_panel .kudora-conditions { padding: 0 12px; }
+
+/* Rewards & tiers */
+.kudora-reward-cards { display: grid; gap: 12px; }
+.kudora-reward-card { border: 1px solid #dcdcde; border-radius: 6px; padding: 10px 14px; margin: 0; }
+.kudora-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; margin: 0 0 6px; }
+.kudora-grid label { display: flex; flex-direction: column; gap: 2px; font-weight: 500; }
+.kudora-grid .kudora-wide { grid-column: 1 / -1; }
+.kudora-grid select, .kudora-grid input { max-width: 100%; }
+
+/* Gift cards */
+.kudora-card { display: flex; flex-direction: column; justify-content: space-between; aspect-ratio: 1.6 / 1; max-width: 320px; padding: 16px 18px; border-radius: 12px; color: #fff; background: #1f2a44; box-shadow: 0 6px 18px rgb(0 0 0 / .15); box-sizing: border-box; }
+.kudora-card-top { display: flex; justify-content: space-between; font-size: 12px; }
+.kudora-card-label { text-transform: uppercase; letter-spacing: .08em; opacity: .85; }
+.kudora-card-amount { font-size: 30px; font-weight: 800; }
+.kudora-card .woocommerce-Price-amount { color: inherit; }
+.kudora-card-mini { width: 72px; min-width: 72px; padding: 6px; font-size: 9px; aspect-ratio: 1.6 / 1; display: inline-flex; box-shadow: none; }
+.kudora-design-list { margin: 0; }
+.kudora-design-list li { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+.kudora-order-box h4 { margin: 12px 0 4px; }
+.kudora-order-box ul { margin: 0; }
+.kudora-order-box li { margin-bottom: 8px; }
+.kudora-inline-form { display: inline-flex; gap: 4px; margin-top: 4px; }
+.kudora-inline-form input { width: 80px; }
+.kudora-code-preview { font-size: 14px; }
+.kudora-errors { max-height: 240px; overflow: auto; background: #fcf0f1; padding: 8px 12px 8px 28px; border-radius: 4px; }
+.kudora-preview { margin-top: 12px; padding: 12px 16px; border: 1px dashed #c3c4c7; border-radius: 6px; }
+.kudora-rules-table .row-actions { left: 0; }

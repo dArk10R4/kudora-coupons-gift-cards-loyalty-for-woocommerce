@@ -1,0 +1,163 @@
+/* Kudora — front end. Inherits theme colours and fonts; only layout and accents here. */
+
+:root {
+	--kudora-accent: #1f2a44;
+	--kudora-radius: 10px;
+	--kudora-muted: color-mix(in srgb, currentColor 60%, transparent);
+	--kudora-line: color-mix(in srgb, currentColor 18%, transparent);
+	--kudora-soft: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+/* ---- Gift card card face ---- */
+.kudora-card {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	aspect-ratio: 1.6 / 1;
+	max-width: 360px;
+	padding: 18px 20px;
+	border-radius: 14px;
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.15);
+	overflow: hidden;
+	background: #1f2a44;
+	color: #fff;
+}
+.kudora-card-large { max-width: 520px; padding: 26px 28px; }
+.kudora-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 0.85em; }
+.kudora-card-store { font-weight: 700; }
+.kudora-card-label { text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
+.kudora-card-amount { font-size: 2.2em; font-weight: 800; line-height: 1.1; }
+.kudora-card-large .kudora-card-amount { font-size: 3em; }
+.kudora-card-to, .kudora-card-from { font-size: 0.95em; }
+.kudora-card-message { font-size: 0.85em; font-style: italic; opacity: 0.9; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.kudora-card .woocommerce-Price-amount { color: inherit; }
+
+/* ---- Purchase form ---- */
+.kudora-gc-form { display: grid; gap: 14px; margin: 0 0 1.2em; }
+.kudora-gc-form fieldset { border: 0; margin: 0; padding: 0; }
+.kudora-gc-form legend, .kudora-gc-form label { font-weight: 600; display: block; margin-bottom: 4px; }
+.kudora-gc-form input[type="text"], .kudora-gc-form input[type="email"], .kudora-gc-form input[type="number"], .kudora-gc-form input[type="date"], .kudora-gc-form textarea { width: 100%; box-sizing: border-box; }
+.kudora-gc-form .form-row { margin: 0; }
+.kudora-gc-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.kudora-gc-pill { position: relative; margin: 0 !important; }
+.kudora-gc-pill input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.kudora-gc-pill span { display: inline-block; padding: 8px 14px; border: 1.5px solid var(--kudora-line); border-radius: 999px; font-weight: 600; }
+.kudora-gc-pill input:checked + span { border-color: currentColor; background: var(--kudora-soft); }
+.kudora-gc-pill input:focus-visible + span { outline: 2px solid currentColor; outline-offset: 2px; }
+.kudora-gc-send-to label { display: inline-flex; gap: 6px; align-items: center; margin-right: 16px; font-weight: 400; }
+.kudora-gc-count, .kudora-gc-form small { display: block; color: var(--kudora-muted); font-weight: 400; margin-top: 2px; }
+.kudora-gc-swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+.kudora-gc-swatch { position: relative; margin: 0 !important; }
+.kudora-gc-swatch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.kudora-gc-swatch-chip { display: block; width: 44px; height: 30px; border-radius: 6px; border: 2px solid var(--kudora-line); }
+.kudora-gc-swatch input:checked + .kudora-gc-swatch-chip { outline: 3px solid currentColor; outline-offset: 2px; }
+.kudora-gc-swatch input:focus-visible + .kudora-gc-swatch-chip { outline: 3px dashed currentColor; outline-offset: 2px; }
+.kudora-gc-preview { margin-top: 4px; }
+
+/* ---- Apply forms (classic) ---- */
+.kudora-gc-apply { margin: 0 0 1.5em; }
+.kudora-gc-apply-cart { max-width: 420px; margin-top: 1.5em; }
+.kudora-gc-apply label { font-weight: 600; display: block; margin-bottom: 4px; }
+.kudora-gc-apply-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.kudora-gc-apply-row input { flex: 1 1 180px; min-width: 0; }
+.kudora-gc-apply.processing { opacity: 0.6; pointer-events: none; }
+.kudora-remove-gift-card, .kudora-remove-points { font-size: 0.85em; margin-left: 6px; }
+.kudora-points-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.kudora-points-form input { width: 7em; }
+.kudora-points-form small { flex-basis: 100%; }
+
+/* ---- Blocks ---- */
+.kudora-block { padding: 8px 16px; font-size: 0.9em; }
+.kudora-block-pad { padding: 4px 0; }
+.kudora-block-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kudora-block-input { flex: 1 1 140px; min-width: 0; padding: 8px 10px; border: 1px solid var(--kudora-line); border-radius: 4px; background: transparent; color: inherit; font: inherit; }
+.kudora-block-label { display: block; font-weight: 600; margin-bottom: 4px; }
+.kudora-block-button.wc-block-components-button { padding: 8px 14px; min-height: 0; }
+.kudora-link-button { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; font-size: 0.9em; }
+.kudora-link-button:focus-visible, .kudora-block-button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.kudora-block-status { margin: 4px 0 0; min-height: 0; font-size: 0.9em; }
+.kudora-block-status:empty { display: none; }
+.kudora-block-notice, .kudora-block-promo { margin: 6px 0; padding: 8px 10px; border-left: 3px solid currentColor; background: var(--kudora-soft); border-radius: 4px; }
+.kudora-block-balance { margin: 0 0 6px; }
+.kudora-block-earn { margin: 6px 0 0; color: var(--kudora-muted); }
+
+/* ---- Messages ---- */
+.kudora-earn-message { margin: 0.4em 0 1em; padding: 8px 12px; border-radius: 6px; background: var(--kudora-soft); font-size: 0.95em; }
+.kudora-earn-row td { color: var(--kudora-muted); }
+
+/* ---- Tables, badges ---- */
+.kudora-table code, .kudora-code { font-size: 0.95em; letter-spacing: 0.03em; }
+.kudora-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.8em; font-weight: 600; background: var(--kudora-soft); border: 1px solid var(--kudora-line); }
+.kudora-badge-active { background: #e7f6ec; color: #135c2f; border-color: #bfe5cc; }
+.kudora-badge-expired, .kudora-badge-disabled { background: #fbeaea; color: #8a1f1f; border-color: #f0c9c9; }
+.kudora-badge-pending, .kudora-badge-inactive { background: #fff5e0; color: #7a4d00; border-color: #f1dcae; }
+.kudora-actions a { margin-right: 10px; }
+.kudora-history summary { cursor: pointer; font-size: 0.9em; }
+.kudora-history ul { margin: 6px 0 0 1em; font-size: 0.9em; }
+.kudora-minus { color: #8a1f1f; }
+.kudora-plus { color: #135c2f; }
+.kudora-empty, .kudora-hint { color: var(--kudora-muted); }
+.kudora-save-card { margin-bottom: 1.5em; max-width: 480px; }
+.kudora-pagination { display: flex; gap: 8px; margin-top: 1em; }
+
+/* ---- Loyalty card ---- */
+.kudora-loyalty-card { padding: 18px 20px; border: 1px solid var(--kudora-line); border-radius: var(--kudora-radius); margin: 0 0 1.5em; }
+.kudora-loyalty-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.kudora-loyalty-points { margin: 0; font-size: 2em; font-weight: 800; line-height: 1.1; }
+.kudora-loyalty-points span { font-size: 0.45em; font-weight: 600; color: var(--kudora-muted); }
+.kudora-loyalty-value { margin: 2px 0 0; color: var(--kudora-muted); font-size: 0.9em; }
+.kudora-tier-badge { --kudora-tier: #1f2a44; display: inline-block; padding: 4px 12px; border-radius: 999px; background: var(--kudora-tier); color: #fff; font-weight: 700; font-size: 0.85em; white-space: nowrap; }
+.kudora-progress { height: 10px; margin: 14px 0 6px; border-radius: 999px; background: var(--kudora-soft); border: 1px solid var(--kudora-line); overflow: hidden; }
+.kudora-progress span { display: block; height: 100%; background: currentColor; border-radius: 999px; }
+.kudora-progress-text { margin: 0; font-size: 0.9em; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.kudora-progress-count { color: var(--kudora-muted); }
+.kudora-expiry-note { margin: 8px 0 0; font-size: 0.85em; color: #7a4d00; }
+
+/* ---- Rewards ---- */
+.kudora-rewards { list-style: none; margin: 0 0 1.5em; padding: 0; display: grid; gap: 10px; }
+.kudora-reward { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--kudora-line); border-radius: var(--kudora-radius); flex-wrap: wrap; }
+.kudora-reward strong, .kudora-reward-desc, .kudora-reward-cost { display: block; }
+.kudora-reward-desc, .kudora-reward-cost, .kudora-reward-why { font-size: 0.85em; color: var(--kudora-muted); }
+.kudora-reward form { margin: 0; text-align: right; }
+.kudora-reward-why { display: block; max-width: 220px; }
+.kudora-referral { max-width: 560px; }
+.kudora-referral input[readonly] { font-family: monospace; }
+
+/* ---- Birthday field ---- */
+.kudora-birthday { border: 0; padding: 0; margin: 1em 0; }
+.kudora-birthday legend { font-weight: 600; }
+
+/* ---- Bulk table ---- */
+.kudora-bulk-table { width: auto; min-width: 240px; margin: 0 0 1.2em; border-collapse: collapse; font-size: 0.95em; }
+.kudora-bulk-table caption { text-align: left; font-weight: 600; margin-bottom: 4px; }
+.kudora-bulk-table th, .kudora-bulk-table td { padding: 6px 12px; border: 1px solid var(--kudora-line); }
+
+/* ---- Balance check ---- */
+.kudora-balance-check { max-width: 480px; }
+.kudora-balance-check label { font-weight: 600; display: block; margin-bottom: 4px; }
+.kudora-balance-result { margin: 8px 0 0; font-weight: 600; }
+.kudora-balance-result.is-error { color: #8a1f1f; }
+
+/* ---- Printable card page ---- */
+body.kudora-printable { margin: 0; background: #f4f4f5; color: #18181b; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.kudora-print-sheet { max-width: 640px; margin: 32px auto; padding: 32px; background: #fff; border-radius: 16px; box-shadow: 0 2px 12px rgb(0 0 0 / 0.08); }
+.kudora-print-message { margin: 24px 0; padding: 12px 16px; border-left: 4px solid #1f2a44; font-style: italic; }
+.kudora-print-code { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-top: 24px; flex-wrap: wrap; }
+.kudora-print-label { margin: 0; color: #52525b; font-size: 0.9em; }
+.kudora-print-value code { font-size: 1.6em; font-weight: 700; letter-spacing: 0.06em; }
+.kudora-print-help { color: #52525b; font-size: 0.9em; }
+.kudora-print-actions { display: flex; gap: 16px; align-items: center; margin-top: 24px; }
+.kudora-print-button { padding: 10px 18px; border: 0; border-radius: 8px; background: #1f2a44; color: #fff; font: inherit; cursor: pointer; }
+@media print {
+	body.kudora-printable { background: #fff; }
+	.kudora-print-sheet { box-shadow: none; margin: 0; }
+	.kudora-print-actions { display: none; }
+	.kudora-card { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+@media (max-width: 600px) {
+	.kudora-card-amount { font-size: 1.8em; }
+	.kudora-reward { align-items: flex-start; }
+	.kudora-reward form { text-align: left; }
+}

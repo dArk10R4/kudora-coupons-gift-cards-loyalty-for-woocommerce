@@ -33,7 +33,7 @@ class Kudora_Blocks_Script implements \Automattic\WooCommerce\Blocks\Integration
 		wp_register_script(
 			'kudora-blocks-checkout',
 			KUDORA_URL . 'assets/js/blocks-checkout.js',
-			array( 'wc-blocks-checkout', 'wp-plugins', 'wp-element', 'wp-data', 'wp-i18n', 'wp-html-entities' ),
+			array( 'wc-blocks-checkout', 'wc-blocks-data-store', 'wc-price-format', 'wc-settings', 'wp-plugins', 'wp-element', 'wp-data', 'wp-i18n' ),
 			KUDORA_VERSION,
 			true
 		);
