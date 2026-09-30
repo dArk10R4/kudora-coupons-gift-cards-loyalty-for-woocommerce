@@ -96,9 +96,35 @@ class Kudora_Frontend {
 	 * @return void
 	 */
 	public function add_endpoints() {
+		$rules   = get_option( 'rewrite_rules' );
+		$missing = false;
 		foreach ( self::endpoints() as $slug ) {
 			add_rewrite_endpoint( $slug, EP_ROOT | EP_PAGES );
+			if ( is_array( $rules ) && $rules && ! self::has_rule( $rules, $slug ) ) {
+				$missing = true;
+			}
 		}
+		// A module was switched on after the last flush: flush once (guarded).
+		if ( $missing && ! get_transient( 'kudora_flushed_recently' ) ) {
+			set_transient( 'kudora_flushed_recently', 1, HOUR_IN_SECONDS );
+			update_option( 'kudora_flush_rewrite', 1 );
+		}
+	}
+
+	/**
+	 * Whether the rewrite rules contain an endpoint.
+	 *
+	 * @param array  $rules Rules.
+	 * @param string $slug  Endpoint.
+	 * @return bool
+	 */
+	protected static function has_rule( array $rules, $slug ) {
+		foreach ( array_keys( $rules ) as $regex ) {
+			if ( false !== strpos( $regex, '/' . $slug . '(/(.*))?/?$' ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

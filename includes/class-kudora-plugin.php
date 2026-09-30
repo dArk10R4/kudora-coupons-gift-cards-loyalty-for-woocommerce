@@ -51,6 +51,7 @@ class Kudora_Plugin {
 		( new Kudora_Scheduler() )->register();
 		( new Kudora_Order_Lifecycle() )->register();
 		( new Kudora_Virtual_Coupons() )->register();
+		( new Kudora_Coupon_Types() )->register();
 
 		if ( Kudora_Settings::module( 'discounts' ) ) {
 			( new Kudora_Discounts() )->register();

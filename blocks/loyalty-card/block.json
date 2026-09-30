@@ -1,0 +1,13 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "kudora/loyalty-card",
+	"title": "Loyalty Points Card",
+	"category": "woocommerce",
+	"icon": "awards",
+	"description": "Shows the signed-in customer's points balance, tier and progress to the next tier.",
+	"keywords": [ "loyalty", "points", "rewards", "kudora" ],
+	"textdomain": "kudora-coupons-gift-cards-loyalty-for-woocommerce",
+	"supports": { "html": false, "align": [ "wide", "full" ] },
+	"editorScript": "file:./index.js"
+}

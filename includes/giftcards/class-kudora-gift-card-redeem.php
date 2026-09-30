@@ -824,7 +824,15 @@ class Kudora_Gift_Card_Redeem {
 		$map             = is_array( $map ) ? $map : array();
 		$map[ $card_id ] = Kudora_Money::round( ( isset( $map[ $card_id ] ) ? $map[ $card_id ] : 0 ) + $amount );
 		$order->update_meta_data( '_kudora_gc_refunded', $map );
+		$order->update_meta_data( '_kudora_gc_refunded_log', (string) $order->get_meta( '_kudora_gc_refunded_log' ) . '|' . $card_id . ':' . $amount . ':' . time() );
 		$order->save_meta_data();
+		/**
+		 * Money was refunded onto a gift card from this order.
+		 *
+		 * @param WC_Order $order  Order.
+		 * @param float    $amount Amount.
+		 */
+		do_action( 'kudora_order_refunded_to_card', $order, $amount );
 		$card = Kudora_Gift_Card_Repo::get( $card_id );
 		/* translators: 1: amount, 2: masked card code */
 		$order->add_order_note( sprintf( __( 'Refunded %1$s to gift card %2$s.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), Kudora_Money::plain( $amount ), $card ? Kudora_Gift_Card_Repo::mask( $card['code'] ) : '#' . $card_id ) );
