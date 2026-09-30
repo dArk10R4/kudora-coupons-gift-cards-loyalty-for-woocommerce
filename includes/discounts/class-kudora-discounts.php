@@ -1,6 +1,6 @@
 <?php
 /**
- * STUB (in progress).
+ * Smart Coupons & Discount Rules module facade.
  *
  * @package Kudora
  */
@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Stub.
+ * Registers the discount services.
  */
 class Kudora_Discounts {
 
@@ -19,5 +19,9 @@ class Kudora_Discounts {
 	 *
 	 * @return void
 	 */
-	public function register() {}
+	public function register() {
+		( new Kudora_Discount_Engine() )->register();
+		( new Kudora_Catalog_Prices() )->register();
+		( new Kudora_Smart_Coupons() )->register();
+	}
 }

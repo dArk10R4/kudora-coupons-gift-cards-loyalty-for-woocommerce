@@ -98,7 +98,7 @@ class Kudora_Gift_Card_Product {
 			'expiry_days'  => '' === $expiry ? Kudora_Settings::int( 'gc_default_expiry_days' ) : (int) $expiry,
 			'designs'      => array_filter( array_map( 'absint', (array) $p->get_meta( '_kudora_gc_designs' ) ) ),
 			'physical'     => 'yes' === $p->get_meta( '_kudora_gc_physical' ),
-			'restrictions' => (array) $p->get_meta( '_kudora_gc_restrictions' ),
+			'restrictions' => is_array( $p->get_meta( '_kudora_gc_restrictions' ) ) ? $p->get_meta( '_kudora_gc_restrictions' ) : array(),
 			'variable'     => $p->is_type( 'variable' ),
 		);
 	}

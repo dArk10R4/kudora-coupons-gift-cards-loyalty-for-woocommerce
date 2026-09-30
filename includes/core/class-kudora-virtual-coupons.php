@@ -256,4 +256,23 @@ class Kudora_Virtual_Coupons {
 		}
 		return $msg;
 	}
+
+	/**
+	 * Whether the current request is the customer removing a coupon (the × in the
+	 * cart), as opposed to WooCommerce dropping it during validation.
+	 *
+	 * @return bool
+	 */
+	public static function is_explicit_removal() {
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- read-only request inspection; WooCommerce verifies its own nonces.
+		$uri = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
+		if ( false !== strpos( $uri, 'cart/remove-coupon' ) ) {
+			return true;
+		}
+		if ( isset( $_GET['wc-ajax'] ) && 'remove_coupon' === sanitize_key( wp_unslash( $_GET['wc-ajax'] ) ) ) {
+			return true;
+		}
+		return isset( $_GET['remove_coupon'] );
+		// phpcs:enable
+	}
 }
