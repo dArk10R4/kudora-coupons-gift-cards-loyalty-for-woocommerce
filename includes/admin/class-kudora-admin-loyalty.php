@@ -598,8 +598,8 @@ class Kudora_Admin_Loyalty {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only.
 		$page = isset( $_GET['paged'] ) ? max( 1, absint( $_GET['paged'] ) ) : 1;
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$total = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
-		$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} ORDER BY id DESC LIMIT 30 OFFSET %d", ( $page - 1 ) * 30 ), ARRAY_A );
+		$total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM %i", $table ) );
+		$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM %i ORDER BY id DESC LIMIT 30 OFFSET %d", $table, ( $page - 1 ) * 30 ), ARRAY_A );
 		// phpcs:enable
 		$reasons = array(
 			'self'             => __( 'Self-referral', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ),

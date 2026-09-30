@@ -130,7 +130,7 @@ class Kudora_Rewards {
 				'fields'         => 'ids',
 				'posts_per_page' => -1,
 				'no_found_rows'  => true,
-				'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_query_meta_query -- rare customer action.
+				'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- rare customer action.
 					array(
 						'key'   => '_kudora_reward_user',
 						'value' => (int) $user_id,
@@ -324,7 +324,7 @@ class Kudora_Rewards {
 				'no_found_rows'  => true,
 				'orderby'        => 'date',
 				'order'          => 'DESC',
-				'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_query_meta_query -- account page listing.
+				'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- account page listing.
 					array(
 						'key'   => '_kudora_reward_user',
 						'value' => (int) $user_id,

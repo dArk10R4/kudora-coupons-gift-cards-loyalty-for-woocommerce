@@ -102,7 +102,7 @@ class Kudora_Points_Repo {
 		}
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, per-request cache.
-		$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE user_id = %d", $user_id ), ARRAY_A );
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM %i WHERE user_id = %d", $table, $user_id ), ARRAY_A );
 		$row = $row ? $row : array(
 			'user_id'          => $user_id,
 			'balance'          => 0,
@@ -257,7 +257,7 @@ class Kudora_Points_Repo {
 					$table = self::table();
 					$now   = Kudora_DB::now();
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, atomic upsert.
-					$ok = $wpdb->query( $wpdb->prepare( "INSERT INTO {$table} (user_id, balance, lifetime_earned, tier_id, last_activity_at, updated_at) VALUES (%d, %d, %d, '', %s, %s) ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance), lifetime_earned = lifetime_earned + VALUES(lifetime_earned), last_activity_at = VALUES(last_activity_at), updated_at = VALUES(updated_at)", $user_id, $points, $lifetime, $now, $now ) );
+					$ok = $wpdb->query( $wpdb->prepare( "INSERT INTO %i (user_id, balance, lifetime_earned, tier_id, last_activity_at, updated_at) VALUES (%d, %d, %d, '', %s, %s) ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance), lifetime_earned = lifetime_earned + VALUES(lifetime_earned), last_activity_at = VALUES(last_activity_at), updated_at = VALUES(updated_at)", $table, $user_id, $points, $lifetime, $now, $now ) );
 					Kudora_DB::check( $ok, 'points add' );
 					self::sync_tier( $user_id );
 					return $id;
@@ -306,7 +306,7 @@ class Kudora_Points_Repo {
 					}
 					$table = self::table();
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, conditional atomic debit.
-					$affected = $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET balance = balance - %d, lifetime_earned = GREATEST(0, lifetime_earned - %d), last_activity_at = %s, updated_at = %s WHERE user_id = %d AND balance >= %d", $points, $opts['lifetime'] ? $points : 0, Kudora_DB::now(), Kudora_DB::now(), $user_id, $points ) );
+					$affected = $wpdb->query( $wpdb->prepare( "UPDATE %i SET balance = balance - %d, lifetime_earned = GREATEST(0, lifetime_earned - %d), last_activity_at = %s, updated_at = %s WHERE user_id = %d AND balance >= %d", $table, $points, $opts['lifetime'] ? $points : 0, Kudora_DB::now(), Kudora_DB::now(), $user_id, $points ) );
 					if ( 1 !== (int) $affected ) {
 						throw new DomainException( 'insufficient' );
 					}
@@ -368,7 +368,7 @@ class Kudora_Points_Repo {
 		$before = self::row( $user_id, true );
 		$table  = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$wpdb->query( $wpdb->prepare( "UPDATE {$table} SET lifetime_earned = GREATEST(0, lifetime_earned - %d) WHERE user_id = %d", $points, $user_id ) );
+		$wpdb->query( $wpdb->prepare( "UPDATE %i SET lifetime_earned = GREATEST(0, lifetime_earned - %d) WHERE user_id = %d", $table, $points, $user_id ) );
 		self::sync_tier( $user_id );
 		self::after_change( $user_id, $before );
 	}
@@ -384,7 +384,7 @@ class Kudora_Points_Repo {
 		global $wpdb;
 		$ledger = self::ledger_table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, locked rows.
-		$lots = $wpdb->get_results( $wpdb->prepare( "SELECT id, remaining FROM {$ledger} WHERE user_id = %d AND remaining > 0 ORDER BY (expires_at IS NULL) ASC, expires_at ASC, id ASC FOR UPDATE", $user_id ), ARRAY_A );
+		$lots = $wpdb->get_results( $wpdb->prepare( "SELECT id, remaining FROM %i WHERE user_id = %d AND remaining > 0 ORDER BY (expires_at IS NULL) ASC, expires_at ASC, id ASC FOR UPDATE", $ledger, $user_id ), ARRAY_A );
 		$left = $points;
 		foreach ( (array) $lots as $lot ) {
 			if ( $left <= 0 ) {
@@ -393,7 +393,7 @@ class Kudora_Points_Repo {
 			$use   = min( $left, (int) $lot['remaining'] );
 			$left -= $use;
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-			$wpdb->query( $wpdb->prepare( "UPDATE {$ledger} SET remaining = remaining - %d WHERE id = %d", $use, $lot['id'] ) );
+			$wpdb->query( $wpdb->prepare( "UPDATE %i SET remaining = remaining - %d WHERE id = %d", $ledger, $use, $lot['id'] ) );
 		}
 	}
 
@@ -441,7 +441,7 @@ class Kudora_Points_Repo {
 		if ( $tier_id !== (string) $row['tier_id'] ) {
 			$table = self::table();
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-			$wpdb->query( $wpdb->prepare( "UPDATE {$table} SET tier_id = %s WHERE user_id = %d", $tier_id, $user_id ) );
+			$wpdb->query( $wpdb->prepare( "UPDATE %i SET tier_id = %s WHERE user_id = %d", $table, $tier_id, $user_id ) );
 		}
 		self::$rows = array();
 	}
@@ -487,7 +487,7 @@ class Kudora_Points_Repo {
 		global $wpdb;
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$ids = $wpdb->get_col( "SELECT user_id FROM {$table}" );
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT user_id FROM %i", $table ) );
 		foreach ( $ids as $id ) {
 			self::sync_tier( (int) $id );
 		}
@@ -508,7 +508,7 @@ class Kudora_Points_Repo {
 		$ledger = self::ledger_table();
 		$now    = Kudora_DB::now();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$lots  = $wpdb->get_results( $wpdb->prepare( "SELECT id, user_id FROM {$ledger} WHERE remaining > 0 AND expires_at IS NOT NULL AND expires_at <= %s ORDER BY expires_at ASC LIMIT %d", $now, $limit ), ARRAY_A );
+		$lots  = $wpdb->get_results( $wpdb->prepare( "SELECT id, user_id FROM %i WHERE remaining > 0 AND expires_at IS NOT NULL AND expires_at <= %s ORDER BY expires_at ASC LIMIT %d", $ledger, $now, $limit ), ARRAY_A );
 		$count = 0;
 		foreach ( (array) $lots as $lot ) {
 			$user_id = (int) $lot['user_id'];
@@ -517,7 +517,7 @@ class Kudora_Points_Repo {
 				$did = Kudora_DB::transaction(
 					function () use ( $wpdb, $ledger, $lot, $user_id ) {
 						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- locked row.
-						$remaining = (int) $wpdb->get_var( $wpdb->prepare( "SELECT remaining FROM {$ledger} WHERE id = %d FOR UPDATE", $lot['id'] ) );
+						$remaining = (int) $wpdb->get_var( $wpdb->prepare( "SELECT remaining FROM %i WHERE id = %d FOR UPDATE", $ledger, $lot['id'] ) );
 						if ( $remaining <= 0 ) {
 							return false;
 						}
@@ -538,10 +538,10 @@ class Kudora_Points_Repo {
 							return false;
 						}
 						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-						$wpdb->query( $wpdb->prepare( "UPDATE {$ledger} SET remaining = 0 WHERE id = %d", $lot['id'] ) );
+						$wpdb->query( $wpdb->prepare( "UPDATE %i SET remaining = 0 WHERE id = %d", $ledger, $lot['id'] ) );
 						$table = self::table();
 						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-						$wpdb->query( $wpdb->prepare( "UPDATE {$table} SET balance = GREATEST(0, balance - %d), updated_at = %s WHERE user_id = %d", $remaining, Kudora_DB::now(), $user_id ) );
+						$wpdb->query( $wpdb->prepare( "UPDATE %i SET balance = GREATEST(0, balance - %d), updated_at = %s WHERE user_id = %d", $table, $remaining, Kudora_DB::now(), $user_id ) );
 						self::sync_tier( $user_id );
 						return true;
 					}
@@ -570,7 +570,7 @@ class Kudora_Points_Repo {
 		$now    = Kudora_DB::now();
 		$until  = gmdate( 'Y-m-d H:i:s', time() + max( 1, (int) $days ) * DAY_IN_SECONDS );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT user_id, SUM(remaining) AS pts, MIN(expires_at) AS first_at FROM {$ledger} WHERE remaining > 0 AND warned = 0 AND expires_at IS NOT NULL AND expires_at > %s AND expires_at <= %s GROUP BY user_id LIMIT 500", $now, $until ), ARRAY_A );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT user_id, SUM(remaining) AS pts, MIN(expires_at) AS first_at FROM %i WHERE remaining > 0 AND warned = 0 AND expires_at IS NOT NULL AND expires_at > %s AND expires_at <= %s GROUP BY user_id LIMIT 500", $ledger, $now, $until ), ARRAY_A );
 		$out  = array();
 		foreach ( (array) $rows as $r ) {
 			$out[ (int) $r['user_id'] ] = array(
@@ -578,7 +578,7 @@ class Kudora_Points_Repo {
 				'date'   => $r['first_at'],
 			);
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-			$wpdb->query( $wpdb->prepare( "UPDATE {$ledger} SET warned = 1 WHERE user_id = %d AND remaining > 0 AND warned = 0 AND expires_at IS NOT NULL AND expires_at <= %s", (int) $r['user_id'], $until ) );
+			$wpdb->query( $wpdb->prepare( "UPDATE %i SET warned = 1 WHERE user_id = %d AND remaining > 0 AND warned = 0 AND expires_at IS NOT NULL AND expires_at <= %s", $ledger, (int) $r['user_id'], $until ) );
 		}
 		return $out;
 	}
@@ -593,7 +593,7 @@ class Kudora_Points_Repo {
 		global $wpdb;
 		$ledger = self::ledger_table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$row = $wpdb->get_row( $wpdb->prepare( "SELECT expires_at, SUM(remaining) AS pts FROM {$ledger} WHERE user_id = %d AND remaining > 0 AND expires_at IS NOT NULL GROUP BY expires_at ORDER BY expires_at ASC LIMIT 1", $user_id ), ARRAY_A );
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT expires_at, SUM(remaining) AS pts FROM %i WHERE user_id = %d AND remaining > 0 AND expires_at IS NOT NULL GROUP BY expires_at ORDER BY expires_at ASC LIMIT 1", $ledger, $user_id ), ARRAY_A );
 		return $row ? array(
 			'points' => (int) $row['pts'],
 			'date'   => $row['expires_at'],
@@ -618,7 +618,7 @@ class Kudora_Points_Repo {
 		global $wpdb;
 		$ledger = self::ledger_table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$ledger} WHERE user_id = %d ORDER BY id DESC LIMIT %d", $user_id, $limit ), ARRAY_A );
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM %i WHERE user_id = %d ORDER BY id DESC LIMIT %d", $ledger, $user_id, $limit ), ARRAY_A );
 	}
 
 	/**
@@ -629,15 +629,23 @@ class Kudora_Points_Repo {
 	 */
 	public static function logs( array $args ) {
 		global $wpdb;
-		list( $where, $vals ) = self::log_where( $args );
-		$ledger   = self::ledger_table();
+		$f        = self::log_filters( $args );
 		$per_page = isset( $args['per_page'] ) ? max( 1, (int) $args['per_page'] ) : 20;
 		$page     = isset( $args['page'] ) ? max( 1, (int) $args['page'] ) : 1;
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- own table; placeholders built in log_where().
-		$count = "SELECT COUNT(*) FROM {$ledger} WHERE {$where}";
-		$total = (int) ( $vals ? $wpdb->get_var( $wpdb->prepare( $count, $vals ) ) : $wpdb->get_var( $count ) );
-		$sql   = "SELECT * FROM {$ledger} WHERE {$where} ORDER BY id DESC LIMIT %d OFFSET %d";
-		$rows  = $wpdb->get_results( $wpdb->prepare( $sql, array_merge( $vals, array( $per_page, ( $page - 1 ) * $per_page ) ) ), ARRAY_A );
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- own table, static SQL; every filter is bound (replacements passed as one list).
+		$total = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM %i WHERE ( %d = 0 OR user_id = %d ) AND ( %s = '' OR action = %s ) AND created_at BETWEEN %s AND %s",
+				...$f
+			)
+		);
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT * FROM %i WHERE ( %d = 0 OR user_id = %d ) AND ( %s = '' OR action = %s ) AND created_at BETWEEN %s AND %s ORDER BY id DESC LIMIT %d OFFSET %d",
+				...array_merge( $f, array( $per_page, ( $page - 1 ) * $per_page ) )
+			),
+			ARRAY_A
+		);
 		// phpcs:enable
 		return array(
 			'rows'  => (array) $rows,
@@ -653,16 +661,19 @@ class Kudora_Points_Repo {
 	 */
 	public static function stats( array $args ) {
 		global $wpdb;
-		list( $where, $vals ) = self::log_where( $args );
-		$ledger               = self::ledger_table();
-		$earn_in              = "'" . implode( "','", array_map( 'esc_sql', self::EARN_ACTIONS ) ) . "'";
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- own table; placeholders built in log_where().
-		$sql = "SELECT
-			COALESCE(SUM(CASE WHEN action IN ({$earn_in}) AND points > 0 THEN points ELSE 0 END),0) AS earned,
-			COALESCE(SUM(CASE WHEN action IN ('redeemed','reward') THEN -points ELSE 0 END),0) - COALESCE(SUM(CASE WHEN action = 'restored' THEN points ELSE 0 END),0) AS redeemed,
-			COUNT(DISTINCT user_id) AS active
-			FROM {$ledger} WHERE {$where}";
-		$row = $vals ? $wpdb->get_row( $wpdb->prepare( $sql, $vals ), ARRAY_A ) : $wpdb->get_row( $sql, ARRAY_A );
+		$f = self::log_filters( $args );
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- own table, static SQL; every filter is bound (replacements passed as one list).
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT
+					COALESCE(SUM(CASE WHEN action IN ('earned','signup','review','birthday','referral','bonus','admin','import') AND points > 0 THEN points ELSE 0 END),0) AS earned,
+					COALESCE(SUM(CASE WHEN action IN ('redeemed','reward') THEN -points ELSE 0 END),0) - COALESCE(SUM(CASE WHEN action = 'restored' THEN points ELSE 0 END),0) AS redeemed,
+					COUNT(DISTINCT user_id) AS active
+				FROM %i WHERE ( %d = 0 OR user_id = %d ) AND ( %s = '' OR action = %s ) AND created_at BETWEEN %s AND %s",
+				...$f
+			),
+			ARRAY_A
+		);
 		// phpcs:enable
 		$earned   = (int) $row['earned'];
 		$redeemed = max( 0, (int) $row['redeemed'] );
@@ -675,31 +686,18 @@ class Kudora_Points_Repo {
 	}
 
 	/**
-	 * WHERE for log queries.
+	 * Bound values for the log filters (table first).
 	 *
 	 * @param array $args Filters.
-	 * @return array{0:string,1:array}
+	 * @return array
 	 */
-	protected static function log_where( array $args ) {
-		$where = array( '1=1' );
-		$vals  = array();
-		if ( ! empty( $args['customer'] ) ) {
-			$where[] = 'user_id = %d';
-			$vals[]  = (int) $args['customer'];
-		}
-		if ( ! empty( $args['action'] ) ) {
-			$where[] = 'action = %s';
-			$vals[]  = sanitize_key( $args['action'] );
-		}
-		if ( ! empty( $args['date_from'] ) ) {
-			$where[] = 'created_at >= %s';
-			$vals[]  = get_gmt_from_date( $args['date_from'] . ' 00:00:00' );
-		}
-		if ( ! empty( $args['date_to'] ) ) {
-			$where[] = 'created_at <= %s';
-			$vals[]  = get_gmt_from_date( $args['date_to'] . ' 23:59:59' );
-		}
-		return array( implode( ' AND ', $where ), $vals );
+	protected static function log_filters( array $args ) {
+		$customer = ! empty( $args['customer'] ) ? (int) $args['customer'] : 0;
+		$action   = ! empty( $args['action'] ) ? sanitize_key( $args['action'] ) : '';
+		// Open-ended date bounds use sentinel dates (MySQL strict mode rejects comparing a DATETIME with '').
+		$from     = ! empty( $args['date_from'] ) ? get_gmt_from_date( $args['date_from'] . ' 00:00:00' ) : '1000-01-01 00:00:00';
+		$to       = ! empty( $args['date_to'] ) ? get_gmt_from_date( $args['date_to'] . ' 23:59:59' ) : '9999-12-31 23:59:59';
+		return array( self::ledger_table(), $customer, $customer, $action, $action, $from, $to );
 	}
 
 	/**
@@ -710,27 +708,27 @@ class Kudora_Points_Repo {
 	 */
 	public static function customers( array $args ) {
 		global $wpdb;
-		$table    = self::table();
-		$where    = array( '1=1' );
-		$vals     = array();
-		if ( ! empty( $args['search'] ) ) {
-			$like    = '%' . $wpdb->esc_like( $args['search'] ) . '%';
-			$where[] = "(u.user_email LIKE %s OR u.display_name LIKE %s OR u.user_login LIKE %s)";
-			array_push( $vals, $like, $like, $like );
-		}
-		if ( ! empty( $args['tier'] ) ) {
-			$where[] = 'p.tier_id = %s';
-			$vals[]  = sanitize_key( $args['tier'] );
-		}
-		$orderby  = isset( $args['orderby'] ) && 'lifetime' === $args['orderby'] ? 'p.lifetime_earned' : 'p.balance';
+		$search   = isset( $args['search'] ) ? trim( (string) $args['search'] ) : '';
+		$like     = '' !== $search ? '%' . $wpdb->esc_like( $search ) . '%' : '';
+		$tier     = ! empty( $args['tier'] ) ? sanitize_key( $args['tier'] ) : '';
+		$orderby  = isset( $args['orderby'] ) && 'lifetime' === $args['orderby'] ? 'lifetime_earned' : 'balance';
 		$per_page = isset( $args['per_page'] ) ? max( 1, (int) $args['per_page'] ) : 20;
 		$page     = isset( $args['page'] ) ? max( 1, (int) $args['page'] ) : 1;
-		$w        = implode( ' AND ', $where );
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- own table joined with users; placeholders built above.
-		$count = "SELECT COUNT(*) FROM {$table} p JOIN {$wpdb->users} u ON u.ID = p.user_id WHERE {$w}";
-		$total = (int) ( $vals ? $wpdb->get_var( $wpdb->prepare( $count, $vals ) ) : $wpdb->get_var( $count ) );
-		$sql   = "SELECT p.*, u.user_email, u.display_name FROM {$table} p JOIN {$wpdb->users} u ON u.ID = p.user_id WHERE {$w} ORDER BY {$orderby} DESC LIMIT %d OFFSET %d";
-		$rows  = $wpdb->get_results( $wpdb->prepare( $sql, array_merge( $vals, array( $per_page, ( $page - 1 ) * $per_page ) ) ), ARRAY_A );
+		$f        = array( self::table(), $wpdb->users, $like, $like, $like, $like, $tier, $tier );
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- own table joined with users, static SQL; every filter is bound (replacements passed as one list).
+		$total = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM %i p JOIN %i u ON u.ID = p.user_id WHERE ( %s = '' OR u.user_email LIKE %s OR u.display_name LIKE %s OR u.user_login LIKE %s ) AND ( %s = '' OR p.tier_id = %s )",
+				...$f
+			)
+		);
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT p.*, u.user_email, u.display_name FROM %i p JOIN %i u ON u.ID = p.user_id WHERE ( %s = '' OR u.user_email LIKE %s OR u.display_name LIKE %s OR u.user_login LIKE %s ) AND ( %s = '' OR p.tier_id = %s ) ORDER BY %i DESC LIMIT %d OFFSET %d",
+				...array_merge( $f, array( $orderby, $per_page, ( $page - 1 ) * $per_page ) )
+			),
+			ARRAY_A
+		);
 		// phpcs:enable
 		return array(
 			'rows'  => (array) $rows,
@@ -766,7 +764,7 @@ class Kudora_Points_Repo {
 		);
 		$now = Kudora_DB::now();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$wpdb->query( $wpdb->prepare( "INSERT INTO {$table} (user_id, balance, lifetime_earned, tier_id, referral_code, updated_at) VALUES (%d, 0, 0, '', %s, %s) ON DUPLICATE KEY UPDATE referral_code = IF(referral_code IS NULL OR referral_code = '', VALUES(referral_code), referral_code)", $user_id, $code, $now ) );
+		$wpdb->query( $wpdb->prepare( "INSERT INTO %i (user_id, balance, lifetime_earned, tier_id, referral_code, updated_at) VALUES (%d, 0, 0, '', %s, %s) ON DUPLICATE KEY UPDATE referral_code = IF(referral_code IS NULL OR referral_code = '', VALUES(referral_code), referral_code)", $table, $user_id, $code, $now ) );
 		self::$rows = array();
 		return (string) self::row( $user_id, true )['referral_code'];
 	}
@@ -781,6 +779,6 @@ class Kudora_Points_Repo {
 		global $wpdb;
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT user_id FROM {$table} WHERE referral_code = %s", strtoupper( (string) $code ) ) );
+		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT user_id FROM %i WHERE referral_code = %s", $table, strtoupper( (string) $code ) ) );
 	}
 }

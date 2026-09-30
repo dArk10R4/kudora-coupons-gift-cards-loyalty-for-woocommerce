@@ -87,33 +87,24 @@ class Kudora_DB {
 	 */
 	public static function insert_ignore( $table, array $data ) {
 		global $wpdb;
-		$cols   = array();
-		$places = array();
-		$values = array();
+		$formats = array();
 		foreach ( $data as $col => $value ) {
-			$cols[] = '`' . preg_replace( '/[^a-z0-9_]/', '', $col ) . '`';
-			if ( null === $value ) {
-				$places[] = 'NULL';
-				continue;
+			if ( is_float( $value ) ) {
+				$data[ $col ] = wc_format_decimal( $value, 4 );
 			}
-			if ( is_int( $value ) ) {
-				$places[] = '%d';
-			} elseif ( is_float( $value ) ) {
-				$places[] = '%s';
-				$value    = wc_format_decimal( $value, 4 );
-			} else {
-				$places[] = '%s';
+			$formats[] = is_int( $value ) ? '%d' : '%s';
+		}
+		$previous = $wpdb->suppress_errors( true );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- own table; a UNIQUE idempotency key makes replays fail harmlessly.
+		$ok = $wpdb->insert( $table, $data, $formats );
+		$wpdb->suppress_errors( $previous );
+		if ( false === $ok ) {
+			if ( false !== stripos( (string) $wpdb->last_error, 'Duplicate' ) ) {
+				return 0;
 			}
-			$values[] = $value;
+			throw new RuntimeException( 'Kudora DB error: ' . esc_html( $wpdb->last_error ) );
 		}
-		$sql = 'INSERT IGNORE INTO `' . preg_replace( '/[^A-Za-z0-9_]/', '', $table ) . '` (' . implode( ',', $cols ) . ') VALUES (' . implode( ',', $places ) . ')';
-		if ( $values ) {
-			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- placeholders built above.
-			$sql = $wpdb->prepare( $sql, $values );
-		}
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- prepared above; own table.
-		$wpdb->query( $sql );
-		return $wpdb->rows_affected > 0 ? (int) $wpdb->insert_id : 0;
+		return (int) $wpdb->insert_id;
 	}
 
 	/**
@@ -152,7 +143,7 @@ class Kudora_DB {
 	public static function check( $result, $context = '' ) {
 		global $wpdb;
 		if ( false === $result || '' !== $wpdb->last_error ) {
-			throw new RuntimeException( 'Kudora DB error ' . $context . ': ' . $wpdb->last_error );
+			throw new RuntimeException( esc_html( 'Kudora DB error ' . $context . ': ' . $wpdb->last_error ) );
 		}
 	}
 }

@@ -183,10 +183,10 @@ class Kudora_Gift_Card_Product {
 			'_kudora_gc_restrictions',
 			Kudora_Scope::sanitize(
 				array(
-					'products'           => isset( $_POST['_kudora_gc_r_products'] ) ? (array) wp_unslash( $_POST['_kudora_gc_r_products'] ) : array(),
-					'categories'         => isset( $_POST['_kudora_gc_r_categories'] ) ? (array) wp_unslash( $_POST['_kudora_gc_r_categories'] ) : array(),
-					'exclude_products'   => isset( $_POST['_kudora_gc_r_exclude_products'] ) ? (array) wp_unslash( $_POST['_kudora_gc_r_exclude_products'] ) : array(),
-					'exclude_categories' => isset( $_POST['_kudora_gc_r_exclude_categories'] ) ? (array) wp_unslash( $_POST['_kudora_gc_r_exclude_categories'] ) : array(),
+					'products'           => isset( $_POST['_kudora_gc_r_products'] ) ? array_map( 'absint', (array) wp_unslash( $_POST['_kudora_gc_r_products'] ) ) : array(),
+					'categories'         => isset( $_POST['_kudora_gc_r_categories'] ) ? array_map( 'absint', (array) wp_unslash( $_POST['_kudora_gc_r_categories'] ) ) : array(),
+					'exclude_products'   => isset( $_POST['_kudora_gc_r_exclude_products'] ) ? array_map( 'absint', (array) wp_unslash( $_POST['_kudora_gc_r_exclude_products'] ) ) : array(),
+					'exclude_categories' => isset( $_POST['_kudora_gc_r_exclude_categories'] ) ? array_map( 'absint', (array) wp_unslash( $_POST['_kudora_gc_r_exclude_categories'] ) ) : array(),
 				)
 			)
 		);
@@ -350,7 +350,7 @@ class Kudora_Gift_Card_Product {
 			return $content;
 		}
 		$previous = $product;
-		$product  = $p; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- the classic template reads the global.
+		$product  = $p; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited, WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound -- the classic template reads WooCommerce's global.
 		if ( $p->is_type( 'variable' ) ) {
 			wp_enqueue_script( 'wc-add-to-cart-variation' );
 		}
@@ -359,7 +359,7 @@ class Kudora_Gift_Card_Product {
 		woocommerce_template_single_add_to_cart();
 		echo '</div>';
 		$html    = ob_get_clean();
-		$product = $previous; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited
+		$product = $previous; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited, WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound
 		return $html;
 	}
 

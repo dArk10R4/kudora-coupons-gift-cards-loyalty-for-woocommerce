@@ -430,16 +430,13 @@ class Kudora_Admin_Gift_Cards {
 	}
 
 	/**
-	 * Capability + nonce guard.
-	 *
-	 * @param string $action Nonce action.
+	 * Capability guard (nonces are checked by the caller).
 	 * @return void
 	 */
-	protected static function guard( $action ) {
+	protected static function guard_caps() {
 		if ( ! current_user_can( 'manage_woocommerce' ) ) {
 			wp_die( esc_html__( 'You are not allowed to do this.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), '', array( 'response' => 403 ) );
 		}
-		check_admin_referer( $action );
 	}
 
 	/**
@@ -448,12 +445,13 @@ class Kudora_Admin_Gift_Cards {
 	 * @return void
 	 */
 	public static function handle_save() {
-		self::guard( 'kudora_gc_save' );
+		self::guard_caps();
+		check_admin_referer( 'kudora_gc_save' );
 		$p     = map_deep( wp_unslash( $_POST ), 'sanitize_text_field' );
 		$id    = isset( $p['id'] ) ? absint( $p['id'] ) : 0;
 		$email = isset( $p['recipient_email'] ) ? sanitize_email( $p['recipient_email'] ) : '';
 		$exp   = isset( $p['expires_on'] ) && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $p['expires_on'] ) ? $p['expires_on'] : null;
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified in guard().
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified by check_admin_referer() above.
 		$message = isset( $_POST['message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['message'] ) ) : '';
 		$fields  = array(
 			'expires_on'      => $exp,
@@ -515,7 +513,8 @@ class Kudora_Admin_Gift_Cards {
 	 * @return void
 	 */
 	public static function handle_bulk_create() {
-		self::guard( 'kudora_gc_bulk_create' );
+		self::guard_caps();
+		check_admin_referer( 'kudora_gc_bulk_create' );
 		$p      = map_deep( wp_unslash( $_POST ), 'sanitize_text_field' );
 		$count  = max( 1, min( 1000, absint( isset( $p['count'] ) ? $p['count'] : 1 ) ) );
 		$amount = Kudora_Money::parse( isset( $p['amount'] ) ? $p['amount'] : 0 );
@@ -548,8 +547,9 @@ class Kudora_Admin_Gift_Cards {
 	 * @return void
 	 */
 	public static function handle_action() {
-		$id = isset( $_GET['id'] ) ? absint( $_GET['id'] ) : 0;
-		self::guard( 'kudora_gc_action_' . $id );
+		$id = isset( $_GET['id'] ) ? absint( $_GET['id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- part of the nonce action checked below.
+		self::guard_caps();
+		check_admin_referer( 'kudora_gc_action_' . $id );
 		$do = isset( $_GET['do'] ) ? sanitize_key( wp_unslash( $_GET['do'] ) ) : '';
 		switch ( $do ) {
 			case 'disable':
@@ -739,7 +739,8 @@ class Kudora_Admin_Gift_Cards {
 	 * @return void
 	 */
 	public static function handle_design_save() {
-		self::guard( 'kudora_design_save' );
+		self::guard_caps();
+		check_admin_referer( 'kudora_design_save' );
 		$p  = map_deep( wp_unslash( $_POST ), 'sanitize_text_field' );
 		$id = Kudora_Gift_Card_Designs::save(
 			array(
@@ -764,8 +765,9 @@ class Kudora_Admin_Gift_Cards {
 	 * @return void
 	 */
 	public static function handle_design_delete() {
-		$id = isset( $_GET['id'] ) ? absint( $_GET['id'] ) : 0;
-		self::guard( 'kudora_design_delete_' . $id );
+		$id = isset( $_GET['id'] ) ? absint( $_GET['id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- part of the nonce action checked below.
+		self::guard_caps();
+		check_admin_referer( 'kudora_design_delete_' . $id );
 		Kudora_Gift_Card_Designs::delete( $id );
 		Kudora_Admin::flash( __( 'Design deleted.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		wp_safe_redirect( self::url( array( 'tab' => 'designs' ) ) );

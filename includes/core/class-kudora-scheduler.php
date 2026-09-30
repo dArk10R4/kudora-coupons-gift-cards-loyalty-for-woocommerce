@@ -115,7 +115,7 @@ class Kudora_Scheduler {
 		if ( function_exists( 'as_enqueue_async_action' ) ) {
 			as_enqueue_async_action( $hook, $args, self::GROUP );
 		} else {
-			do_action_ref_array( $hook, $args );
+			do_action_ref_array( $hook, $args ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- our own kudora_* hooks.
 		}
 	}
 }

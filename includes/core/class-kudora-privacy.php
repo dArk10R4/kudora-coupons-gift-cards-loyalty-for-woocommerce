@@ -67,7 +67,7 @@ class Kudora_Privacy {
 		$uid   = $user ? (int) $user->ID : -1;
 		$table = Kudora_DB::table( 'gift_cards' );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} WHERE recipient_email = %s OR purchaser_email = %s OR owner_id = %d OR purchaser_id = %d LIMIT 500", strtolower( $email ), $email, $uid, $uid ), ARRAY_A );
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM %i WHERE recipient_email = %s OR purchaser_email = %s OR owner_id = %d OR purchaser_id = %d LIMIT 500", $table, strtolower( $email ), $email, $uid, $uid ), ARRAY_A );
 	}
 
 	/**

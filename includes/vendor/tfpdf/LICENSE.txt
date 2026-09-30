@@ -1,0 +1,6 @@
+tFPDF 1.33 (http://www.fpdf.org/en/script/script92.php)
+Authors: Ian Back, Tycho Veltmeijer. Based on FPDF by Olivier Plathey.
+License: GNU Lesser General Public License (LGPL), see https://www.gnu.org/licenses/lgpl-2.1.html
+
+Kudora changes: class and constant names prefixed (Kudora_Vendor_*, KUDORA_*),
+font metric cache writes disabled (nothing is written to the plugin folder).

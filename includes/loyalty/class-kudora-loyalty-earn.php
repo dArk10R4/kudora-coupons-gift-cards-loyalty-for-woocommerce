@@ -519,8 +519,8 @@ class Kudora_Loyalty_Earn {
 		$year  = wp_date( 'Y' );
 		$users = get_users(
 			array(
-				'meta_key'   => '_kudora_birthday', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_query_meta_key -- daily background job.
-				'meta_value' => $today, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_query_meta_value -- daily background job.
+				'meta_key'   => '_kudora_birthday', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- daily background job.
+				'meta_value' => $today, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value -- daily background job.
 				'fields'     => 'ID',
 				'number'     => 2000,
 			)

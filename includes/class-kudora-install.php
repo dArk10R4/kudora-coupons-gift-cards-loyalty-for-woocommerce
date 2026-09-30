@@ -264,7 +264,7 @@ CREATE TABLE {$p}kudora_referrals (
 		$now   = current_time( 'mysql', true );
 		$table = $wpdb->prefix . 'kudora_gift_card_designs';
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off install check on our own table.
-		$has = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+		$has = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM %i", $table ) );
 		if ( 0 === $has ) {
 			$designs = array(
 				array( __( 'Classic', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), '#1f2a44', '#ffffff' ),
@@ -313,11 +313,11 @@ CREATE TABLE {$p}kudora_referrals (
 		global $wpdb;
 		foreach ( self::TABLES as $table ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- uninstall drops our own tables.
-			$wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}{$table}" );
+			$wpdb->query( $wpdb->prepare( "DROP TABLE IF EXISTS %i", $wpdb->prefix . $table ) );
 		}
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall removes our own options.
-		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", $wpdb->esc_like( 'kudora_' ) . '%' ) );
+		$wpdb->query( $wpdb->prepare( "DELETE FROM %i WHERE option_name LIKE %s", $wpdb->options, $wpdb->esc_like( 'kudora_' ) . '%' ) );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- uninstall removes our own user meta.
-		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->usermeta} WHERE meta_key LIKE %s", $wpdb->esc_like( '_kudora_' ) . '%' ) );
+		$wpdb->query( $wpdb->prepare( "DELETE FROM %i WHERE meta_key LIKE %s", $wpdb->usermeta, $wpdb->esc_like( '_kudora_' ) . '%' ) );
 	}
 }

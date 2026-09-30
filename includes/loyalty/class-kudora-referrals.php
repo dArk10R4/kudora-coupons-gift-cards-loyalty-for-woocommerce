@@ -302,7 +302,7 @@ class Kudora_Referrals {
 		global $wpdb;
 		$table = Kudora_DB::table( 'referrals' );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE order_id = %d", $order_id ), ARRAY_A );
+		return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM %i WHERE order_id = %d", $table, $order_id ), ARRAY_A );
 	}
 
 	/**
@@ -416,7 +416,7 @@ class Kudora_Referrals {
 		$table = Kudora_DB::table( 'referrals' );
 		$start = get_gmt_from_date( wp_date( 'Y-m-01 00:00:00' ) );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE referrer_id = %d AND status = 'rewarded' AND updated_at >= %s", $referrer, $start ) );
+		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM %i WHERE referrer_id = %d AND status = 'rewarded' AND updated_at >= %s", $table, $referrer, $start ) );
 	}
 
 	/**
@@ -520,7 +520,7 @@ class Kudora_Referrals {
 		global $wpdb;
 		$table = Kudora_DB::table( 'referrals' );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT status, COUNT(*) AS n FROM {$table} WHERE referrer_id = %d GROUP BY status", $referrer ), ARRAY_A );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT status, COUNT(*) AS n FROM %i WHERE referrer_id = %d GROUP BY status", $table, $referrer ), ARRAY_A );
 		$out  = array(
 			'rewarded' => 0,
 			'pending'  => 0,

@@ -34,7 +34,7 @@ class Kudora_Gift_Card_Designs {
 		if ( null === self::$all ) {
 			$table = Kudora_DB::table( 'gift_card_designs' );
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, per-request cache.
-			$rows = (array) $wpdb->get_results( "SELECT * FROM {$table} ORDER BY sort_order ASC, id ASC", ARRAY_A );
+			$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM %i ORDER BY sort_order ASC, id ASC", $table ), ARRAY_A );
 			foreach ( $rows as &$r ) {
 				$r['id']         = (int) $r['id'];
 				$r['image_id']   = (int) $r['image_id'];

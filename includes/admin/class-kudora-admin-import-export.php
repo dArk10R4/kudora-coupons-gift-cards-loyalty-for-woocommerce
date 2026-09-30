@@ -194,16 +194,13 @@ class Kudora_Admin_Import_Export {
 	}
 
 	/**
-	 * Guard.
-	 *
-	 * @param string $nonce Nonce action.
+	 * Capability guard (nonces are checked by the caller).
 	 * @return void
 	 */
-	protected static function guard( $nonce ) {
+	protected static function guard_caps() {
 		if ( ! current_user_can( 'manage_woocommerce' ) ) {
 			wp_die( esc_html__( 'You are not allowed to do this.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), '', array( 'response' => 403 ) );
 		}
-		check_admin_referer( $nonce );
 	}
 
 	/**
@@ -212,7 +209,8 @@ class Kudora_Admin_Import_Export {
 	 * @return void
 	 */
 	public static function handle_upload() {
-		self::guard( 'kudora_import_upload' );
+		self::guard_caps();
+		check_admin_referer( 'kudora_import_upload' );
 		$type = isset( $_POST['type'] ) && isset( Kudora_Importer::types()[ sanitize_key( $_POST['type'] ) ] ) ? sanitize_key( $_POST['type'] ) : 'gift_cards';
 		$mode = isset( $_POST['mode'] ) ? sanitize_key( wp_unslash( $_POST['mode'] ) ) : 'create';
 		if ( empty( $_FILES['csv'] ) || ! isset( $_FILES['csv']['tmp_name'] ) ) {
@@ -289,7 +287,8 @@ class Kudora_Admin_Import_Export {
 	 * @return void
 	 */
 	public static function handle_run() {
-		self::guard( 'kudora_import_run' );
+		self::guard_caps();
+		check_admin_referer( 'kudora_import_run' );
 		$preview = get_transient( 'kudora_import_preview_' . get_current_user_id() );
 		if ( ! is_array( $preview ) || empty( $preview['path'] ) ) {
 			Kudora_Admin::flash( __( 'The preview expired. Upload the file again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), 'error' );
@@ -329,8 +328,9 @@ class Kudora_Admin_Import_Export {
 	 * @return void
 	 */
 	public static function handle_export() {
-		$type = isset( $_GET['type'] ) ? sanitize_key( wp_unslash( $_GET['type'] ) ) : '';
-		self::guard( 'kudora_export_' . $type );
+		$type = isset( $_GET['type'] ) ? sanitize_key( wp_unslash( $_GET['type'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- part of the nonce action checked below.
+		self::guard_caps();
+		check_admin_referer( 'kudora_export_' . $type );
 		$date = gmdate( 'Y-m-d' );
 		if ( 'points' === $type ) {
 			$rows = array( array( 'user_id', 'email', 'name', 'points', 'lifetime_earned', 'tier' ) );

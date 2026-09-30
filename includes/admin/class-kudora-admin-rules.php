@@ -488,7 +488,7 @@ class Kudora_Admin_Rules {
 	 * @return void
 	 */
 	public static function handle_action() {
-		$id = isset( $_GET['id'] ) ? absint( $_GET['id'] ) : 0;
+		$id = isset( $_GET['id'] ) ? absint( $_GET['id'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- part of the nonce action checked below.
 		if ( ! current_user_can( 'manage_woocommerce' ) ) {
 			wp_die( esc_html__( 'You are not allowed to do this.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), '', array( 'response' => 403 ) );
 		}

@@ -68,7 +68,7 @@ class Kudora_Rules_Repo {
 		$table = self::table();
 		$now   = Kudora_DB::now();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, per-request cache.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} WHERE module = %s AND status = 1 AND (starts_at IS NULL OR starts_at <= %s) AND (ends_at IS NULL OR ends_at >= %s) AND (usage_limit IS NULL OR usage_count < usage_limit) ORDER BY priority ASC, id ASC", $module, $now, $now ), ARRAY_A );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM %i WHERE module = %s AND status = 1 AND (starts_at IS NULL OR starts_at <= %s) AND (ends_at IS NULL OR ends_at >= %s) AND (usage_limit IS NULL OR usage_count < usage_limit) ORDER BY priority ASC, id ASC", $table, $module, $now, $now ), ARRAY_A );
 		self::$active[ $module ] = array_map( array( __CLASS__, 'hydrate' ), (array) $rows );
 		return self::$active[ $module ];
 	}
@@ -83,7 +83,7 @@ class Kudora_Rules_Repo {
 		global $wpdb;
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} WHERE module = %s ORDER BY priority ASC, id ASC", $module ), ARRAY_A );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM %i WHERE module = %s ORDER BY priority ASC, id ASC", $table, $module ), ARRAY_A );
 		return array_map( array( __CLASS__, 'hydrate' ), (array) $rows );
 	}
 
@@ -97,7 +97,7 @@ class Kudora_Rules_Repo {
 		global $wpdb;
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		return self::hydrate( $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id = %d", $id ), ARRAY_A ) );
+		return self::hydrate( $wpdb->get_row( $wpdb->prepare( "SELECT * FROM %i WHERE id = %d", $table, $id ), ARRAY_A ) );
 	}
 
 	/**
@@ -173,7 +173,7 @@ class Kudora_Rules_Repo {
 		global $wpdb;
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$wpdb->query( $wpdb->prepare( "UPDATE {$table} SET usage_count = GREATEST(0, CAST(usage_count AS SIGNED) + %d) WHERE id = %d", (int) $delta, $id ) );
+		$wpdb->query( $wpdb->prepare( "UPDATE %i SET usage_count = GREATEST(0, CAST(usage_count AS SIGNED) + %d) WHERE id = %d", $table, (int) $delta, $id ) );
 		self::$active = array();
 	}
 

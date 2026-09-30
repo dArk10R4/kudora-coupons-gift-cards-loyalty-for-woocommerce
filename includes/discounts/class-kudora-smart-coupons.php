@@ -137,7 +137,7 @@ class Kudora_Smart_Coupons {
 				'fields'         => 'ids',
 				'posts_per_page' => 50,
 				'no_found_rows'  => true,
-				'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_query_meta_query -- only on coupon save.
+				'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- only on coupon save.
 					array(
 						'key'   => '_kudora_auto_apply',
 						'value' => 'yes',

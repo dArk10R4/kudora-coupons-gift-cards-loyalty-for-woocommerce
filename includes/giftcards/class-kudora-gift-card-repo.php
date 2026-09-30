@@ -99,7 +99,7 @@ class Kudora_Gift_Card_Repo {
 		global $wpdb;
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table; always fresh for money.
-		return self::hydrate( $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id = %d", $id ), ARRAY_A ) );
+		return self::hydrate( $wpdb->get_row( $wpdb->prepare( "SELECT * FROM %i WHERE id = %d", $table, $id ), ARRAY_A ) );
 	}
 
 	/**
@@ -120,7 +120,7 @@ class Kudora_Gift_Card_Repo {
 		}
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, per-request cache above.
-		$row                  = self::hydrate( $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE code = %s", $code ), ARRAY_A ) );
+		$row                  = self::hydrate( $wpdb->get_row( $wpdb->prepare( "SELECT * FROM %i WHERE code = %s", $table, $code ), ARRAY_A ) );
 		self::$cache[ $code ] = $row;
 		return $row;
 	}
@@ -304,7 +304,7 @@ class Kudora_Gift_Card_Repo {
 					}
 					$table = self::table();
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table, conditional atomic debit.
-					$affected = $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET balance = balance - %s, updated_at = %s WHERE id = %d AND status IN ('active','pending') AND balance >= %s AND (expires_on IS NULL OR expires_on >= %s)", wc_format_decimal( $amount, 4 ), Kudora_DB::now(), $id, wc_format_decimal( $amount, 4 ), self::today() ) );
+					$affected = $wpdb->query( $wpdb->prepare( "UPDATE %i SET balance = balance - %s, updated_at = %s WHERE id = %d AND status IN ('active','pending') AND balance >= %s AND (expires_on IS NULL OR expires_on >= %s)", $table, wc_format_decimal( $amount, 4 ), Kudora_DB::now(), $id, wc_format_decimal( $amount, 4 ), self::today() ) );
 					if ( 1 !== (int) $affected ) {
 						throw new DomainException( 'insufficient' );
 					}
@@ -347,7 +347,7 @@ class Kudora_Gift_Card_Repo {
 					}
 					$table = self::table();
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-					$affected = $wpdb->query( $wpdb->prepare( "UPDATE {$table} SET balance = balance + %s, updated_at = %s WHERE id = %d", wc_format_decimal( $amount, 4 ), Kudora_DB::now(), $id ) );
+					$affected = $wpdb->query( $wpdb->prepare( "UPDATE %i SET balance = balance + %s, updated_at = %s WHERE id = %d", $table, wc_format_decimal( $amount, 4 ), Kudora_DB::now(), $id ) );
 					if ( 1 !== (int) $affected ) {
 						throw new RuntimeException( 'card missing' );
 					}
@@ -378,7 +378,7 @@ class Kudora_Gift_Card_Repo {
 				function () use ( $wpdb, $id, $balance, $note ) {
 					$table = self::table();
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- lock the row.
-					$current = $wpdb->get_var( $wpdb->prepare( "SELECT balance FROM {$table} WHERE id = %d FOR UPDATE", $id ) );
+					$current = $wpdb->get_var( $wpdb->prepare( "SELECT balance FROM %i WHERE id = %d FOR UPDATE", $table, $id ) );
 					if ( null === $current ) {
 						throw new RuntimeException( 'card missing' );
 					}
@@ -456,7 +456,7 @@ class Kudora_Gift_Card_Repo {
 		$cards  = self::table();
 		$ledger = self::ledger_table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own tables.
-		$wpdb->query( $wpdb->prepare( "UPDATE {$ledger} l JOIN {$cards} c ON c.id = l.gift_card_id SET l.balance_after = c.balance WHERE l.id = %d AND c.id = %d", $ledger_id, $card_id ) );
+		$wpdb->query( $wpdb->prepare( "UPDATE %i l JOIN %i c ON c.id = l.gift_card_id SET l.balance_after = c.balance WHERE l.id = %d AND c.id = %d", $ledger, $cards, $ledger_id, $card_id ) );
 	}
 
 	/**
@@ -469,7 +469,7 @@ class Kudora_Gift_Card_Repo {
 		global $wpdb;
 		$ledger = self::ledger_table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$ledger} WHERE gift_card_id = %d ORDER BY id DESC", $id ), ARRAY_A );
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM %i WHERE gift_card_id = %d ORDER BY id DESC", $ledger, $id ), ARRAY_A );
 	}
 
 	/**
@@ -482,7 +482,7 @@ class Kudora_Gift_Card_Repo {
 		global $wpdb;
 		$ledger = self::ledger_table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$sum = (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(amount),0) FROM {$ledger} WHERE gift_card_id = %d AND type IN ('redeem','restore')", $id ) );
+		$sum = (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(amount),0) FROM %i WHERE gift_card_id = %d AND type IN ('redeem','restore')", $ledger, $id ) );
 		return Kudora_Money::round( -$sum );
 	}
 
@@ -494,54 +494,50 @@ class Kudora_Gift_Card_Repo {
 	 */
 	public static function query( array $args ) {
 		global $wpdb;
-		$table = self::table();
-		$where = array( '1=1' );
-		$vals  = array();
-		if ( ! empty( $args['search'] ) ) {
-			$like    = '%' . $wpdb->esc_like( $args['search'] ) . '%';
-			$where[] = '(code LIKE %s OR recipient_email LIKE %s OR purchaser_email LIKE %s OR recipient_name LIKE %s)';
-			array_push( $vals, $like, $like, $like, $like );
-		}
-		if ( ! empty( $args['status'] ) ) {
-			$where[] = 'status = %s';
-			$vals[]  = $args['status'];
-		}
-		if ( ! empty( $args['source'] ) ) {
-			$where[] = 'source = %s';
-			$vals[]  = $args['source'];
-		}
-		if ( ! empty( $args['order_id'] ) ) {
-			$where[] = 'order_id = %d';
-			$vals[]  = (int) $args['order_id'];
-		}
-		if ( ! empty( $args['design_id'] ) ) {
-			$where[] = 'design_id = %d';
-			$vals[]  = (int) $args['design_id'];
-		}
-		if ( ! empty( $args['date_from'] ) ) {
-			$where[] = 'created_at >= %s';
-			$vals[]  = $args['date_from'] . ' 00:00:00';
-		}
-		if ( ! empty( $args['date_to'] ) ) {
-			$where[] = 'created_at <= %s';
-			$vals[]  = $args['date_to'] . ' 23:59:59';
-		}
-		if ( ! empty( $args['customer'] ) ) {
-			$user    = get_userdata( (int) $args['customer'] );
-			$where[] = '(owner_id = %d OR purchaser_id = %d OR recipient_email = %s)';
-			array_push( $vals, (int) $args['customer'], (int) $args['customer'], $user ? strtolower( $user->user_email ) : '-' );
-		}
+		$table    = self::table();
+		$search   = isset( $args['search'] ) ? trim( (string) $args['search'] ) : '';
+		$like     = '' !== $search ? '%' . $wpdb->esc_like( $search ) . '%' : '';
+		$status   = isset( $args['status'] ) ? (string) $args['status'] : '';
+		$source   = isset( $args['source'] ) ? (string) $args['source'] : '';
+		$order_id = isset( $args['order_id'] ) ? (int) $args['order_id'] : 0;
+		$design   = isset( $args['design_id'] ) ? (int) $args['design_id'] : 0;
+		// Open-ended date bounds use sentinel dates (MySQL strict mode rejects comparing a DATETIME with '').
+		$from     = ! empty( $args['date_from'] ) && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $args['date_from'] ) ? $args['date_from'] . ' 00:00:00' : '1000-01-01 00:00:00';
+		$to       = ! empty( $args['date_to'] ) && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $args['date_to'] ) ? $args['date_to'] . ' 23:59:59' : '9999-12-31 23:59:59';
+		$customer = isset( $args['customer'] ) ? (int) $args['customer'] : 0;
+		$user     = $customer ? get_userdata( $customer ) : null;
+		$email    = $user ? strtolower( $user->user_email ) : '-';
 		$orderby  = isset( $args['orderby'] ) && in_array( $args['orderby'], array( 'id', 'code', 'balance', 'initial_amount', 'expires_on', 'created_at' ), true ) ? $args['orderby'] : 'id';
-		$order    = isset( $args['order'] ) && 'asc' === strtolower( $args['order'] ) ? 'ASC' : 'DESC';
+		$asc      = isset( $args['order'] ) && 'asc' === strtolower( $args['order'] );
 		$per_page = isset( $args['per_page'] ) ? max( 1, (int) $args['per_page'] ) : 20;
 		$page     = isset( $args['page'] ) ? max( 1, (int) $args['page'] ) : 1;
-		$sql_where = implode( ' AND ', $where );
+		$filters  = array( $table, $like, $like, $like, $like, $like, $status, $status, $source, $source, $order_id, $order_id, $design, $design, $from, $to, $customer, $customer, $customer, $email );
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- own table; placeholders built above.
-		$count_sql = "SELECT COUNT(*) FROM {$table} WHERE {$sql_where}";
-		$total     = (int) ( $vals ? $wpdb->get_var( $wpdb->prepare( $count_sql, $vals ) ) : $wpdb->get_var( $count_sql ) );
-		$list_sql  = "SELECT * FROM {$table} WHERE {$sql_where} ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d";
-		$rows      = $wpdb->get_results( $wpdb->prepare( $list_sql, array_merge( $vals, array( $per_page, ( $page - 1 ) * $per_page ) ) ), ARRAY_A );
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- own table, static SQL; every filter is bound (replacements passed as one list).
+		$total = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM %i WHERE ( %s = '' OR code LIKE %s OR recipient_email LIKE %s OR purchaser_email LIKE %s OR recipient_name LIKE %s ) AND ( %s = '' OR status = %s ) AND ( %s = '' OR source = %s ) AND ( %d = 0 OR order_id = %d ) AND ( %d = 0 OR design_id = %d ) AND created_at BETWEEN %s AND %s AND ( %d = 0 OR owner_id = %d OR purchaser_id = %d OR recipient_email = %s )",
+				...$filters
+			)
+		);
+		$list_args = array_merge( $filters, array( $orderby, $per_page, ( $page - 1 ) * $per_page ) );
+		if ( $asc ) {
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT * FROM %i WHERE ( %s = '' OR code LIKE %s OR recipient_email LIKE %s OR purchaser_email LIKE %s OR recipient_name LIKE %s ) AND ( %s = '' OR status = %s ) AND ( %s = '' OR source = %s ) AND ( %d = 0 OR order_id = %d ) AND ( %d = 0 OR design_id = %d ) AND created_at BETWEEN %s AND %s AND ( %d = 0 OR owner_id = %d OR purchaser_id = %d OR recipient_email = %s ) ORDER BY %i ASC LIMIT %d OFFSET %d",
+					...$list_args
+				),
+				ARRAY_A
+			);
+		} else {
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT * FROM %i WHERE ( %s = '' OR code LIKE %s OR recipient_email LIKE %s OR purchaser_email LIKE %s OR recipient_name LIKE %s ) AND ( %s = '' OR status = %s ) AND ( %s = '' OR source = %s ) AND ( %d = 0 OR order_id = %d ) AND ( %d = 0 OR design_id = %d ) AND created_at BETWEEN %s AND %s AND ( %d = 0 OR owner_id = %d OR purchaser_id = %d OR recipient_email = %s ) ORDER BY %i DESC LIMIT %d OFFSET %d",
+					...$list_args
+				),
+				ARRAY_A
+			);
+		}
 		// phpcs:enable
 
 		return array(
@@ -575,7 +571,7 @@ class Kudora_Gift_Card_Repo {
 		global $wpdb;
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		return (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(balance),0) FROM {$table} WHERE status IN ('active','pending') AND (expires_on IS NULL OR expires_on >= %s)", self::today() ) );
+		return (float) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(balance),0) FROM %i WHERE status IN ('active','pending') AND (expires_on IS NULL OR expires_on >= %s)", $table, self::today() ) );
 	}
 
 	/**
@@ -613,7 +609,7 @@ class Kudora_Gift_Card_Repo {
 		global $wpdb;
 		$table = self::table();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- own table.
-		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM {$table} WHERE status = 'active' AND expires_on IS NOT NULL AND expires_on < %s LIMIT 500", self::today() ) );
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM %i WHERE status = 'active' AND expires_on IS NOT NULL AND expires_on < %s LIMIT 500", $table, self::today() ) );
 		foreach ( $ids as $id ) {
 			self::set_status( (int) $id, 'expired', __( 'Expiry date passed.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) );
 		}
