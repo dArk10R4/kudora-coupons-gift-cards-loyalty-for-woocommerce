@@ -1,0 +1,19 @@
+# Files and directories excluded from the distributed plugin package
+# (see bin/build-dist.sh / `npm run dist`). Development-only; never shipped.
+/.git
+/.gitignore
+/.distignore
+/node_modules
+/bin
+/dist
+/DOCUMENTATION.md
+# Any hidden file or folder at any depth, Markdown docs, OS/editor junk,
+# logs, source maps and nested archives.
+.*
+*.md
+*.log
+*.map
+*.zip
+Thumbs.db
+/package.json
+/package-lock.json

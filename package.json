@@ -1,0 +1,10 @@
+{
+  "name": "kudora-coupons-gift-cards-loyalty-for-woocommerce",
+  "version": "1.0.0",
+  "description": "Smart coupons & discount rules, gift cards and a loyalty points program for WooCommerce, all free.",
+  "private": true,
+  "license": "GPL-2.0-or-later",
+  "scripts": {
+    "dist": "bash bin/build-dist.sh"
+  }
+}

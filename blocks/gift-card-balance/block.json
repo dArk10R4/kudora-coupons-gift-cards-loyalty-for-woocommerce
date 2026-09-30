@@ -1,0 +1,13 @@
+{
+	"$schema": "https://schemas.wp.org/trunk/block.json",
+	"apiVersion": 3,
+	"name": "kudora/gift-card-balance",
+	"title": "Gift Card Balance",
+	"category": "woocommerce",
+	"icon": "tickets-alt",
+	"description": "A form where customers check the balance of a gift card.",
+	"keywords": [ "gift card", "balance", "kudora" ],
+	"textdomain": "kudora-coupons-gift-cards-loyalty-for-woocommerce",
+	"supports": { "html": false, "align": [ "wide", "full" ] },
+	"editorScript": "file:./index.js"
+}
