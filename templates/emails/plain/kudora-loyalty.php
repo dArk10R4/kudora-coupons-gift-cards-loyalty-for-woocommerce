@@ -21,7 +21,7 @@ foreach ( array_filter( $paragraphs ) as $kudora_p ) {
 if ( '' !== $highlight ) {
 	echo esc_html( $highlight ) . "\n\n";
 }
-echo esc_url_raw( $cta_url ) . "\n\n";
+echo esc_url( $cta_url ) . "\n\n";
 if ( $additional_content ) {
 	echo esc_html( wp_strip_all_tags( wptexturize( $additional_content ) ) ) . "\n\n";
 }

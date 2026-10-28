@@ -22,8 +22,7 @@ $kudora_style = Kudora_Gift_Card_Designs::style( $design );
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<meta name="robots" content="noindex, nofollow" />
 	<title><?php echo esc_html( get_bloginfo( 'name' ) . ' – ' . __( 'Gift card', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) ); ?></title>
-	<?php // phpcs:ignore WordPress.WP.EnqueuedResources.NonEnqueuedStylesheet -- standalone printable document outside the theme. ?>
-	<link rel="stylesheet" href="<?php echo esc_url( KUDORA_URL . 'assets/css/frontend.css?ver=' . KUDORA_VERSION ); ?>" />
+	<?php wp_print_styles( 'kudora-frontend' ); ?>
 </head>
 <body class="kudora-printable">
 	<main class="kudora-print-sheet">
@@ -78,9 +77,10 @@ $kudora_style = Kudora_Gift_Card_Designs::style( $design );
 		<p class="kudora-print-help"><?php echo esc_html( sprintf( __( 'Enter this code in the gift card or coupon field at checkout on %s. Any remaining balance stays on the card.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), wp_parse_url( home_url(), PHP_URL_HOST ) ) ); ?></p>
 
 		<p class="kudora-print-actions">
-			<button type="button" class="kudora-print-button" onclick="window.print()"><?php esc_html_e( 'Print', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></button>
+			<button type="button" class="kudora-print-button"><?php esc_html_e( 'Print', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></button>
 			<a href="<?php echo esc_url( $pdf_url ); ?>"><?php esc_html_e( 'Download PDF', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ); ?></a>
 		</p>
 	</main>
+	<?php wp_print_scripts( 'kudora-printable' ); ?>
 </body>
 </html>

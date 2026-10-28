@@ -87,7 +87,7 @@ class Kudora_Frontend {
 				'copied' => __( 'Copied!', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ),
 			)
 		);
-
+		wp_register_script( 'kudora-printable', KUDORA_URL . 'assets/js/printable.js', array(), KUDORA_VERSION, true );
 	}
 
 	/**

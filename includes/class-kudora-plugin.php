@@ -94,12 +94,22 @@ class Kudora_Plugin {
 	}
 
 	/**
+	 * Dependency notices show only on the Plugins screen, to admins who can act on them.
+	 *
+	 * @return bool
+	 */
+	protected function show_dependency_notice() {
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+		return current_user_can( 'activate_plugins' ) && $screen && in_array( $screen->id, array( 'plugins', 'plugins-network' ), true );
+	}
+
+	/**
 	 * Admin notice when WooCommerce is not active.
 	 *
 	 * @return void
 	 */
 	public function notice_wc_missing() {
-		if ( ! current_user_can( 'activate_plugins' ) ) {
+		if ( ! $this->show_dependency_notice() ) {
 			return;
 		}
 		echo '<div class="notice notice-warning"><p>';
@@ -113,7 +123,7 @@ class Kudora_Plugin {
 	 * @return void
 	 */
 	public function notice_wc_old() {
-		if ( ! current_user_can( 'activate_plugins' ) ) {
+		if ( ! $this->show_dependency_notice() ) {
 			return;
 		}
 		echo '<div class="notice notice-warning"><p>';

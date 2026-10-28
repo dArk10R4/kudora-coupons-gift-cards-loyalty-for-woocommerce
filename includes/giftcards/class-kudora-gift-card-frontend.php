@@ -89,6 +89,9 @@ class Kudora_Gift_Card_Frontend {
 			}
 		}
 		$design = Kudora_Gift_Card_Designs::get( $card['design_id'] );
+		// Standalone document: the template prints just these instead of calling wp_head().
+		wp_enqueue_style( 'kudora-frontend' );
+		wp_enqueue_script( 'kudora-printable' );
 		wc_get_template(
 			'gift-card/printable.php',
 			array(

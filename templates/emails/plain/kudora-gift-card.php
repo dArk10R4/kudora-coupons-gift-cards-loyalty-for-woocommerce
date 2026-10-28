@@ -36,7 +36,7 @@ if ( '' !== trim( (string) $card['message'] ) ) {
 	echo "\n" . esc_html( $card['message'] ) . "\n";
 }
 echo "\n" . esc_html__( 'Enter the code in the gift card or coupon field at checkout. Any remaining balance stays on the card for your next order.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ) . "\n";
-echo esc_url_raw( $print_url ) . "\n\n";
+echo esc_url( $print_url ) . "\n\n";
 
 if ( $additional_content ) {
 	echo esc_html( wp_strip_all_tags( wptexturize( $additional_content ) ) ) . "\n\n";
