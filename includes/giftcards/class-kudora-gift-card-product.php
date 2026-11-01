@@ -370,7 +370,7 @@ class Kudora_Gift_Card_Product {
 		echo '</div>';
 		$html    = ob_get_clean();
 		$product = $previous; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited, WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound
-		return $html;
+		return $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- WooCommerce's own add-to-cart template, escaped there; kses would break it (drops the variable form's <template> tag but keeps its gallery HTML, and prints add-ons' inline scripts as text).
 	}
 
 	/**

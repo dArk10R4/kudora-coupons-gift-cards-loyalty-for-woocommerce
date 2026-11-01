@@ -192,6 +192,49 @@ class Kudora_Frontend {
 	}
 
 	/**
+	 * Allowed HTML for templates returned by our shortcodes and blocks: post HTML plus
+	 * the form controls and ARIA attributes they print (themes may override them).
+	 *
+	 * @return array
+	 */
+	public static function allowed_html() {
+		$common = array(
+			'class'            => true,
+			'id'               => true,
+			'style'            => true,
+			'title'            => true,
+			'role'             => true,
+			'aria-label'       => true,
+			'aria-describedby' => true,
+			'data-*'           => true,
+		);
+		$html          = wp_kses_allowed_html( 'post' );
+		$html['form']  = $common + array(
+			'action'     => true,
+			'method'     => true,
+			'novalidate' => true,
+		);
+		$html['input'] = $common + array(
+			'type'         => true,
+			'name'         => true,
+			'value'        => true,
+			'placeholder'  => true,
+			'autocomplete' => true,
+			'spellcheck'   => true,
+			'required'     => true,
+			'readonly'     => true,
+			'disabled'     => true,
+			'maxlength'    => true,
+		);
+		$html['div']  += array(
+			'aria-valuemin' => true,
+			'aria-valuemax' => true,
+			'aria-valuenow' => true,
+		);
+		return $html;
+	}
+
+	/**
 	 * Endpoint page title.
 	 *
 	 * @param string $title    Title.

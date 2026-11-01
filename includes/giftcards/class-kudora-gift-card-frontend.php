@@ -267,7 +267,7 @@ class Kudora_Gift_Card_Frontend {
 				'error' => __( 'Something went wrong. Please try again.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ),
 			)
 		);
-		return wc_get_template_html( 'gift-card/balance-check.php', array( 'uid' => wp_unique_id( 'kudora-balance-' ) ), '', KUDORA_DIR . 'templates/' );
+		return wp_kses( wc_get_template_html( 'gift-card/balance-check.php', array( 'uid' => wp_unique_id( 'kudora-balance-' ) ), '', KUDORA_DIR . 'templates/' ), Kudora_Frontend::allowed_html() );
 	}
 
 	/**

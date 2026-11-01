@@ -122,7 +122,7 @@ class Kudora_Loyalty_Frontend {
 			return $content;
 		}
 		$product = wc_get_product( get_the_ID() );
-		return self::product_message_html( $product ) . $content;
+		return wp_kses_post( self::product_message_html( $product ) ) . $content;
 	}
 
 	/**
@@ -182,7 +182,7 @@ class Kudora_Loyalty_Frontend {
 			/* translators: %s: account URL */
 			return '<p class="kudora-points-login">' . wp_kses_post( sprintf( __( '<a href="%s">Sign in</a> to see your points.', 'kudora-coupons-gift-cards-loyalty-for-woocommerce' ), esc_url( wc_get_page_permalink( 'myaccount' ) ) ) ) . '</p>';
 		}
-		return wc_get_template_html( 'loyalty/card.php', array( 'card' => self::card_data( get_current_user_id() ) ), '', KUDORA_DIR . 'templates/' );
+		return wp_kses( wc_get_template_html( 'loyalty/card.php', array( 'card' => self::card_data( get_current_user_id() ) ), '', KUDORA_DIR . 'templates/' ), Kudora_Frontend::allowed_html() );
 	}
 
 	/**
@@ -196,7 +196,7 @@ class Kudora_Loyalty_Frontend {
 		}
 		wp_enqueue_style( 'kudora-frontend' );
 		wp_enqueue_script( 'kudora-account' );
-		return wc_get_template_html( 'loyalty/referral.php', array( 'link' => Kudora_Referrals::link_for( get_current_user_id() ) ), '', KUDORA_DIR . 'templates/' );
+		return wp_kses( wc_get_template_html( 'loyalty/referral.php', array( 'link' => Kudora_Referrals::link_for( get_current_user_id() ) ), '', KUDORA_DIR . 'templates/' ), Kudora_Frontend::allowed_html() );
 	}
 
 	/**
